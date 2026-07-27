@@ -240,3 +240,5 @@ az webapp stop --name <your-app-name> --resource-group rg-rag-assistant
 | 上傳 PDF 失敗、TXT 正常 | Document Intelligence 的 endpoint/key 未設定 |
 | 聊天回 503 | Azure OpenAI 部署名稱與環境變數不符，或配額用盡 |
 | 問答答不出文件內容 | 索引尚未建立或 embedding 維度不符。確認索引存在且模型為 1536 維 |
+| 刪掉 RG 後重跑腳本,Key Vault 建立失敗說名稱已被使用 | Key Vault 的 soft-delete 是強制的,刪除後名稱仍被保留 90 天。用 `az keyvault purge --name <name> --location <location>` 徹底清除後再重跑,或換一個名稱 |
+| `az ad app create` 權限不足 | 建立 app registration 需要目錄權限,公司租戶常會禁止。改請管理員代建,或在個人訂閱操作 |
