@@ -23,7 +23,9 @@ jobs:
       SECRET_KEY: ${{ secrets.DJANGO_SECRET_KEY || 'ci-secret-key-not-for-production' }}
       DEBUG: "True"
       ALLOWED_HOSTS: localhost,127.0.0.1,testserver
-      DATABASE_URL: sqlite:///:memory:
+      # 必須加引號:結尾的冒號會被 YAML 當成 mapping 鍵指示符,
+      # 未加引號時整個 workflow 會被 GitHub 判定為 invalid 而完全不執行。
+      DATABASE_URL: "sqlite:///:memory:"
       CORS_ALLOWED_ORIGINS: http://localhost:5173
       # ── Azure (CI 不呼叫真實服務,但 settings 仍需有值) ──
       AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT || 'https://ci.openai.azure.com/' }}
