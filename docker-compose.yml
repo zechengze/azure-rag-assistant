@@ -1,0 +1,62 @@
+# 本地開發環境 — Postgres + Django backend
+# 用法:
+#   docker compose up -d                       # 啟動所有服務
+#   docker compose run --rm backend pytest     # 在容器內跑測試 (Step 6 驗證)
+#   docker compose down -v                     # 完全清除 (含資料卷)
+#
+# 注意:此檔僅供本地開發/測試。生產部署應使用 Azure App Service + Azure Database for PostgreSQL。
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ragdb
+      POSTGRES_USER: raguser
+      POSTGRES_PASSWORD: ragpassword
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U raguser -d ragdb"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    # 所有機密/Azure 設定來自 backend/.env (與本機裸機開發共用同一份)
+    env_file:
+      - ./backend/.env
+    # environment 區塊「覆寫」.env 中不適用於容器的值:
+    #   - DATABASE_URL:容器內須連到 postgres 服務,而非 localhost
+    #   - ALLOWED_HOSTS:加入 compose 服務名稱 backend
+    environment:
+      DATABASE_URL: postgresql://raguser:ragpassword@postgres:5432/ragdb
+      ALLOWED_HOSTS: localhost,127.0.0.1,backend
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # 原始碼 bind mount — 讓 runserver 的 autoreload 真的看得到主機上的修改。
+    # 沒有這行的話,容器跑的永遠是 build 當下 `COPY . .` 的快照,
+    # 改了 code 也要 `docker compose build backend` 才會生效。
+    #
+    # staticfiles 用具名 volume 蓋回去:collectstatic 是在 build time 執行的,
+    # 產物只存在於映像內,會被 ./backend 這層 bind mount 遮蔽。
+    # (具名 volume 首次建立時 Docker 會把映像內同路徑的內容複製進去)
+    volumes:
+      - ./backend:/app
+      - backend_staticfiles:/app/staticfiles
+    # Dev:用 runserver 取代 gunicorn 取得熱重載 (cover Dockerfile CMD)
+    # 依賴套件變更 (requirements.txt) 仍需 rebuild;site-packages 不在 /app 內。
+    command: >
+      sh -c "python manage.py migrate &&
+             python manage.py runserver 0.0.0.0:8000"
+
+volumes:
+  postgres_data:
+  backend_staticfiles:
