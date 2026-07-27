@@ -1,0 +1,50 @@
+# 環境變數與機密資訊 — 絕不提交
+.env
+.env.local
+.env.production
+*.pem
+*.key
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyc
+venv/
+.venv/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+htmlcov/
+.coverage
+
+# Node.js
+node_modules/
+dist/
+.next/
+.nuxt/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Django
+staticfiles/
+media/
+db.sqlite3
+*.sqlite3
+
+# TypeScript build info
+*.tsbuildinfo
+
+# macOS
+.DS_Store
+
+# Claude Code — 本機專屬設定不進版控 (CLAUDE.md 與 launch.json 則需共享)
+.claude/settings.local.json
+.claude/worktrees/
+
+# Azure
+*.publishsettings
