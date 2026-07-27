@@ -84,10 +84,12 @@ REST_FRAMEWORK = {
         "rest_framework.throttling.AnonRateThrottle",
         "rest_framework.throttling.UserRateThrottle",
     ],
+    # 額度可由環境變數覆寫：公開 demo 由多位訪客共用單一帳號，
+    # 需要比一般部署更嚴格的上限來封住 AI 推論成本。
     "DEFAULT_THROTTLE_RATES": {
-        "anon": "20/hour",
-        "user": "100/hour",
-        "chat": "30/hour",
+        "anon": config("THROTTLE_ANON", default="20/hour"),
+        "user": config("THROTTLE_USER", default="100/hour"),
+        "chat": config("THROTTLE_CHAT", default="30/hour"),
     },
     "DEFAULT_FILTER_BACKENDS": [
         "django_filters.rest_framework.DjangoFilterBackend",
