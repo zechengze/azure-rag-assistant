@@ -5,8 +5,7 @@ View 整合測試 — 使用 DRF APIClient 覆蓋三個主要端點。
 
 from __future__ import annotations
 
-import io
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from django.contrib.auth import get_user_model

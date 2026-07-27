@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import logging
 import re
-import uuid
 from typing import Any
 
 from azure.core.credentials import AzureKeyCredential
@@ -275,7 +274,6 @@ class AzureSearchService:
             if current_length + sentence_length > chunk_size and current_chunk:
                 chunks.append(" ".join(current_chunk))
                 # 保留最後幾個句子作為 overlap
-                overlap_text = " ".join(current_chunk)
                 overlap_sentences = []
                 overlap_length = 0
                 for s in reversed(current_chunk):

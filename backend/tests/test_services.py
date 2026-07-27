@@ -5,12 +5,12 @@ RAG 服務測試套件。
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, PropertyMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from services.openai_service import AzureOpenAIService, OpenAIServiceError
-from services.search_service import AzureSearchService, SearchServiceError
+from services.search_service import AzureSearchService
 
 # ─── Fixtures ────────────────────────────────────────────────────────────────
 

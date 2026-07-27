@@ -4,20 +4,13 @@ AzureBlobService 測試 — 涵蓋 MIME 路由、SAS、上傳、刪除 (Azure SD
 
 from __future__ import annotations
 
-from io import BytesIO
 from unittest.mock import MagicMock, patch
 
 import pytest
 from azure.core.exceptions import AzureError
 from django.core.files.uploadedfile import SimpleUploadedFile
 
-from services.blob_service import (
-    DOCX_MIME,
-    PDF_MIME,
-    TXT_MIME,
-    AzureBlobService,
-    BlobServiceError,
-)
+from services.blob_service import PDF_MIME, TXT_MIME, AzureBlobService, BlobServiceError
 
 # ── Static 路由方法 (不需 Azure SDK) ─────────────────────────────────────────
 
