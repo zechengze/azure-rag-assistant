@@ -1,0 +1,64 @@
+# 前端持續部署 — Vite build → Azure Static Web Apps (Free tier)
+#
+# 需要的 repository variable: VITE_API_URL  (例: https://<webapp>.azurewebsites.net)
+# 需要的 repository secret:   AZURE_STATIC_WEB_APPS_API_TOKEN
+#
+# 刻意不使用 SWA 內建的 Oryx 建置：VITE_ 前綴的變數在 build time 就被寫入
+# bundle，自行執行 npm run build 才能明確控制注入哪些值。
+
+name: Deploy Frontend
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "frontend/**"
+      - ".github/workflows/deploy-frontend.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-frontend
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Build and deploy to Static Web Apps
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build
+        working-directory: frontend
+        env:
+          VITE_API_URL: ${{ vars.VITE_API_URL }}
+        run: |
+          if [ -z "${VITE_API_URL}" ]; then
+            echo "::error::VITE_API_URL repository variable 未設定 — " \
+                 "建置出的前端會指向 localhost 而無法連上後端"
+            exit 1
+          fi
+          npm run build
+
+      - name: Deploy
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token:
+            ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+          action: upload
+          app_location: frontend/dist
+          skip_app_build: true
