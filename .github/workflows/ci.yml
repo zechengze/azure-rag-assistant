@@ -18,26 +18,9 @@ jobs:
       matrix:
         python-version: ["3.11"]
 
-    env:
-      # ── Django ──
-      SECRET_KEY: ${{ secrets.DJANGO_SECRET_KEY || 'ci-secret-key-not-for-production' }}
-      DEBUG: "True"
-      ALLOWED_HOSTS: localhost,127.0.0.1,testserver
-      # 必須加引號:結尾的冒號會被 YAML 當成 mapping 鍵指示符,
-      # 未加引號時整個 workflow 會被 GitHub 判定為 invalid 而完全不執行。
-      DATABASE_URL: "sqlite:///:memory:"
-      CORS_ALLOWED_ORIGINS: http://localhost:5173
-      # ── Azure (CI 不呼叫真實服務,但 settings 仍需有值) ──
-      AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT || 'https://ci.openai.azure.com/' }}
-      AZURE_OPENAI_KEY: ${{ secrets.AZURE_OPENAI_KEY || 'ci-key' }}
-      AZURE_OPENAI_CHAT_DEPLOYMENT: gpt-4.1-mini
-      AZURE_OPENAI_EMBEDDING_DEPLOYMENT: text-embedding-3-small
-      AZURE_SEARCH_ENDPOINT: ${{ secrets.AZURE_SEARCH_ENDPOINT || 'https://ci.search.windows.net' }}
-      AZURE_SEARCH_KEY: ${{ secrets.AZURE_SEARCH_KEY || 'ci-key' }}
-      AZURE_STORAGE_CONNECTION_STRING: ${{ secrets.AZURE_STORAGE_CONNECTION_STRING || 'DefaultEndpointsProtocol=https;AccountName=ci;AccountKey=Y2lrZXk=;EndpointSuffix=core.windows.net' }}
-      AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT: https://ci.cognitiveservices.azure.com/
-      AZURE_DOCUMENT_INTELLIGENCE_KEY: ci-di-key
-
+    # 刻意不注入任何環境變數:測試設定由 core/settings_test.py 提供
+    # (pytest.ini 指定為 DJANGO_SETTINGS_MODULE),該模組強制覆寫所有
+    # Azure 值為佔位字串。CI 因此不需要、也不應該持有任何真實金鑰。
     steps:
       - uses: actions/checkout@v4
 
