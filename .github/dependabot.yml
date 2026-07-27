@@ -1,0 +1,39 @@
+# 依賴更新自動開 PR。
+# commit-message.prefix 對齊 CLAUDE.md 的 Conventional Commits 規範,
+# 讓機器產生的 commit 與人工 commit 在歷史中格式一致。
+
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: /backend
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      # Azure SDK 版本彼此相依,分開更新容易產生無法解析的組合
+      azure-sdk:
+        patterns:
+          - "azure-*"
+
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      react:
+        patterns:
+          - "react"
+          - "react-dom"
+          - "@types/react*"
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: "chore(ci)"
