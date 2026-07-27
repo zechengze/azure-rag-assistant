@@ -101,20 +101,42 @@ gh repo edit --homepage "https://<your-swa>.azurestaticapps.net"
 
 ## 4. 安全設定
 
-這個專案的賣點之一就是資安實踐（CLAUDE.md 有整節規範），把對應的 GitHub 功能打開，說法才站得住：
+這個專案的賣點之一就是資安實踐（CLAUDE.md 有整節規範），把對應的 GitHub 功能打開，說法才站得住。
+
+先看現況，不要盲目設定：
 
 ```bash
-gh api -X PATCH repos/{owner}/{repo} \
-  -F security_and_analysis[secret_scanning][status]=enabled \
-  -F security_and_analysis[secret_scanning_push_protection][status]=enabled
+gh api repos/{owner}/{repo} --jq '.security_and_analysis'
 ```
+
+**公開 repo 的 `secret_scanning` 與 `secret_scanning_push_protection` 由 GitHub 預設開啟**，通常不需要手動處理：
 
 - **Secret scanning**：掃描已提交的金鑰
 - **Push protection**：在 push 當下就阻擋含金鑰的 commit（這是真正有用的那一個）
 
-Dependabot 在 Settings → Code security 開啟 **Dependabot alerts** 與 **security updates**。
+實際需要手動開啟的是 Dependabot，兩者各有專屬端點：
 
-若要讓依賴更新自動開 PR，加上 `.github/dependabot.yml`（pip + npm 各一個 ecosystem）。面試角度看，這會讓 repo 有真實的 PR 活動記錄。
+```bash
+gh api -X PUT repos/{owner}/{repo}/vulnerability-alerts      # Dependabot alerts
+gh api -X PUT repos/{owner}/{repo}/automated-security-fixes  # 自動開修補 PR
+```
+
+搭配已就緒的 `.github/dependabot.yml`，依賴更新會自動開 PR——面試角度看，這讓 repo 有真實的 PR 活動記錄。
+
+選用的進階掃描（偵測不屬於已知供應商格式的通用金鑰、並驗證掃到的 token 是否仍有效）：
+
+```bash
+gh api -X PATCH repos/{owner}/{repo} --input - <<'JSON'
+{
+  "security_and_analysis": {
+    "secret_scanning_non_provider_patterns": { "status": "enabled" },
+    "secret_scanning_validity_checks": { "status": "enabled" }
+  }
+}
+JSON
+```
+
+> **不要用 `-F security_and_analysis[secret_scanning][status]=enabled`。** 兩個問題：`gh api` 的 `-F` 不會把方括號展開成嵌套 JSON，GitHub 會收到一個字面上叫 `security_and_analysis[secret_scanning][status]` 的扁平欄位並忽略它；而且方括號在 zsh 中是通配字元，未加引號會直接得到 `zsh: no matches found`。嵌套物件一律用 `--input` 傳真正的 JSON。
 
 ---
 
