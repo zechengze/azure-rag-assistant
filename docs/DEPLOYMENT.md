@@ -214,19 +214,30 @@ az webapp config appsettings set \
 
 ## 停止計費
 
-面試結束後刪除整個 resource group，所有資源一次歸零：
+> ⚠️ **`az webapp stop` 不會省到錢。** App Service Plan 是按「已配置」計費，不是按執行時間，停掉 web app 後 plan 照樣每小時計費。Linux 容器又不支援 Free/Shared 層（F1 不能跑自訂容器），所以沒有降級這條路——**要停止計費只能刪掉 plan**。
+
+### 情境一：整個 RG 都是這個 demo 專用
 
 ```bash
 az group delete --name rg-rag-assistant --yes --no-wait
 ```
 
-只想暫停後端運算費用（保留資料與設定）：
+### 情境二：RG 內還有你想保留的資源
+
+若把 demo 部署進既有的 RG（例如沿用已有的 AI Search 免費層實例），**絕對不要刪整個 RG**。只刪掉會計費的運算資源：
 
 ```bash
-az webapp stop --name <your-app-name> --resource-group rg-rag-assistant
+# App Service（$13/月）— plan 必須一起刪，只刪 webapp 仍會計費
+az webapp delete --name <APP_NAME> --resource-group <RG>
+az appservice plan delete --name asp-<APP_NAME> --resource-group <RG> --yes
+
+# Container Registry（$5/月）
+az acr delete --name <ACR_NAME> --resource-group <RG> --yes
 ```
 
-需要時 `az webapp start` 即可恢復。面試前一天重跑 `provision.sh` 就能重建整個環境——這也是把佈建寫成腳本而非在 Portal 手點的理由。
+Key Vault、Storage、AI Search 免費層、Azure OpenAI（按 token 計費）閒置時幾乎不產生費用，留著即可——也省下重建時的 soft-delete 與免費層額度問題。
+
+重跑 `provision.sh` 就能把刪掉的部分補回來（腳本是 idempotent 的，既存資源會自動略過）。這正是把佈建寫成腳本而非在 Portal 手點的理由：面試前一天用 5 分鐘重建，而不是半小時手動點選還可能漏設定。
 
 ---
 

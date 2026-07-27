@@ -139,6 +139,33 @@ set_secret() {
   echo "  已設定 ${name}"
 }
 
+# Cognitive Services 的金鑰直接向 Azure 索取,provision.env 因此不必存放機密。
+# 只有在 provision.env 明確設了 *_KEY 時才沿用該值(例如資源不在此訂閱下)。
+resolve_cognitive_key() {
+  local account="$1" account_rg="$2"
+  if [[ -z "${account}" ]]; then
+    return 0
+  fi
+  az cognitiveservices account keys list \
+    --name "${account}" \
+    --resource-group "${account_rg:-${RESOURCE_GROUP}}" \
+    --query key1 --output tsv 2>/dev/null || true
+}
+
+if [[ -z "${AZURE_OPENAI_KEY:-}" ]]; then
+  AZURE_OPENAI_KEY=$(resolve_cognitive_key \
+    "${AZURE_OPENAI_ACCOUNT:-}" "${AZURE_OPENAI_ACCOUNT_RG:-}")
+  [[ -n "${AZURE_OPENAI_KEY}" ]] && echo "  已自動取得 Azure OpenAI 金鑰"
+fi
+
+if [[ -z "${AZURE_DOCUMENT_INTELLIGENCE_KEY:-}" ]]; then
+  AZURE_DOCUMENT_INTELLIGENCE_KEY=$(resolve_cognitive_key \
+    "${AZURE_DOCUMENT_INTELLIGENCE_ACCOUNT:-}" \
+    "${AZURE_DOCUMENT_INTELLIGENCE_ACCOUNT_RG:-}")
+  [[ -n "${AZURE_DOCUMENT_INTELLIGENCE_KEY}" ]] &&
+    echo "  已自動取得 Document Intelligence 金鑰"
+fi
+
 DJANGO_SECRET_KEY="${DJANGO_SECRET_KEY:-$(openssl rand -base64 48 | tr -d '\n')}"
 
 set_secret "secret-key" "${DJANGO_SECRET_KEY}"
