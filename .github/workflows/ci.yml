@@ -1,0 +1,90 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  backend:
+    name: Backend (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11"]
+
+    env:
+      # ── Django ──
+      SECRET_KEY: ${{ secrets.DJANGO_SECRET_KEY || 'ci-secret-key-not-for-production' }}
+      DEBUG: "True"
+      ALLOWED_HOSTS: localhost,127.0.0.1,testserver
+      DATABASE_URL: sqlite:///:memory:
+      CORS_ALLOWED_ORIGINS: http://localhost:5173
+      # ── Azure (CI 不呼叫真實服務,但 settings 仍需有值) ──
+      AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT || 'https://ci.openai.azure.com/' }}
+      AZURE_OPENAI_KEY: ${{ secrets.AZURE_OPENAI_KEY || 'ci-key' }}
+      AZURE_OPENAI_CHAT_DEPLOYMENT: gpt-4.1-mini
+      AZURE_OPENAI_EMBEDDING_DEPLOYMENT: text-embedding-3-small
+      AZURE_SEARCH_ENDPOINT: ${{ secrets.AZURE_SEARCH_ENDPOINT || 'https://ci.search.windows.net' }}
+      AZURE_SEARCH_KEY: ${{ secrets.AZURE_SEARCH_KEY || 'ci-key' }}
+      AZURE_STORAGE_CONNECTION_STRING: ${{ secrets.AZURE_STORAGE_CONNECTION_STRING || 'DefaultEndpointsProtocol=https;AccountName=ci;AccountKey=Y2lrZXk=;EndpointSuffix=core.windows.net' }}
+      AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT: https://ci.cognitiveservices.azure.com/
+      AZURE_DOCUMENT_INTELLIGENCE_KEY: ci-di-key
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        run: pip install --upgrade pip && pip install -r requirements.txt
+
+      - name: Check formatting (black)
+        run: black --check .
+
+      - name: Check import order (isort)
+        run: isort --check-only .
+
+      - name: Lint (flake8)
+        run: flake8 .
+
+      - name: Type check (mypy)
+        run: mypy . || true  # 規格中 mypy 為「靜態分析」,允許 warning-only 直到完整型別覆蓋
+
+      - name: Run tests with coverage
+        run: pytest --cov=. --cov-report=term-missing --cov-fail-under=70
+
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci || npm install
+
+      - name: Type check
+        run: npx tsc --noEmit
+
+      - name: Build
+        run: npm run build
