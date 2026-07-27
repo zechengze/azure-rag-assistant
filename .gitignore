@@ -40,6 +40,9 @@ db.sqlite3
 # TypeScript build info
 *.tsbuildinfo
 
+# Vite 依賴預打包快取
+.vite/
+
 # macOS
 .DS_Store
 
