@@ -1,8 +1,32 @@
 # Azure RAG Knowledge Assistant
 
-[![CI](https://github.com/<owner>/<repo>/actions/workflows/ci.yml/badge.svg)](https://github.com/<owner>/<repo>/actions/workflows/ci.yml)
+[![CI](https://github.com/OWNER/REPO/actions/workflows/ci.yml/badge.svg)](https://github.com/OWNER/REPO/actions/workflows/ci.yml)
+[![Deploy Backend](https://github.com/OWNER/REPO/actions/workflows/deploy-backend.yml/badge.svg)](https://github.com/OWNER/REPO/actions/workflows/deploy-backend.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
 
 企業級知識問答系統,整合 Azure OpenAI、Azure AI Search、Azure Document Intelligence 與 RAG (Retrieval-Augmented Generation) 技術。全程使用 Claude Code 進行 AI 輔助開發,作為 AZ-204 認證備考實作專案。
+
+> **建立 repo 後請替換上方 badge 的 `OWNER/REPO`**,以及下方的 Live Demo 網址與帳密。設定步驟見 [docs/GITHUB_SETUP.md](./docs/GITHUB_SETUP.md)。
+
+## 線上 Demo
+
+**https://REPLACE-WITH-YOUR-SWA-URL.azurestaticapps.net**
+
+| 帳號 | 密碼 |
+|---|---|
+| `demo` | `REPLACE-ME` |
+
+登入後知識庫已預先索引三份說明本系統架構的文件,可以直接提問,例如:
+
+- 「這個系統怎麼做多租戶隔離?」
+- 「為什麼要用混合搜尋而不是純向量搜尋?」
+- 「chunk 大小和重疊是多少,為什麼這樣設?」
+- 「Prompt injection 是怎麼防的?」
+
+也可以自行上傳 PDF / TXT / DOCX(≤10MB)測試。
+
+> Demo 環境為 Free / B1 等級並設有限流(聊天 15 次/小時),僅供功能展示。
+> 部署方式與成本明細見 [docs/DEPLOYMENT.md](./docs/DEPLOYMENT.md)。
 
 ## 系統架構
 
@@ -199,42 +223,61 @@ docker compose run --rm backend pytest --cov=. --cov-fail-under=70
 
 ## API 端點
 
-| 方法 | 路徑 | 描述 |
-|---|---|---|
-| POST | `/api/token/` | 取得 JWT access + refresh |
-| POST | `/api/token/refresh/` | 用 refresh 換新的 access |
-| POST | `/api/chat/` | RAG 問答 (支援 `stream=true` SSE 串流) |
-| POST | `/api/documents/upload/` | 上傳文件 (multipart, PDF/TXT/DOCX, ≤10MB) |
-| DELETE | `/api/documents/<document_id>/` | 軟刪除文件 (Blob + Search index) |
+| 方法 | 路徑 | 驗證 | 描述 |
+|---|---|---|---|
+| GET | `/api/health/` | — | 健康檢查 (不查 DB、不呼叫 Azure) |
+| POST | `/api/token/` | — | 取得 JWT access + refresh |
+| POST | `/api/token/refresh/` | — | 用 refresh 換新的 access |
+| POST | `/api/chat/` | JWT | RAG 問答 (支援 `stream=true` SSE 串流) |
+| GET | `/api/documents/` | JWT | 列出目前使用者的文件 |
+| POST | `/api/documents/upload/` | JWT | 上傳文件 (multipart, PDF/TXT/DOCX, ≤10MB) |
+| DELETE | `/api/documents/<document_id>/` | JWT | 軟刪除文件 (Blob + Search index) |
 
-## 部署 (Azure App Service)
+限流預設值:匿名 20 次/小時、已驗證 100 次/小時、聊天端點 30 次/小時。聊天端點需要獨立且更嚴格的額度,因為它是唯一會觸發付費 AI 推論的端點。三者皆可透過 `THROTTLE_ANON` / `THROTTLE_USER` / `THROTTLE_CHAT` 覆寫。
+
+## 部署
+
+一次性佈建整個 Azure 環境:
 
 ```bash
-# 1. 建置並推送至 Azure Container Registry
-az acr login --name <registry>
-docker build -t <registry>.azurecr.io/azure-rag-assistant:latest ./backend
-docker push <registry>.azurecr.io/azure-rag-assistant:latest
-
-# 2. 建立 App Service (首次)
-az webapp create \
-  --resource-group rg-rag-assistant \
-  --plan asp-rag-assistant \
-  --name azure-rag-assistant \
-  --deployment-container-image-name <registry>.azurecr.io/azure-rag-assistant:latest
-
-# 3. 設定 App Setting (環境變數)
-az webapp config appsettings set \
-  --resource-group rg-rag-assistant \
-  --name azure-rag-assistant \
-  --settings \
-    SECRET_KEY="@Microsoft.KeyVault(SecretUri=...)" \
-    AZURE_OPENAI_KEY="@Microsoft.KeyVault(SecretUri=...)" \
-    DEBUG=False \
-    ALLOWED_HOSTS=azure-rag-assistant.azurewebsites.net
+cp infra/provision.env.example infra/provision.env   # 填入設定
+./infra/provision.sh
 ```
 
-生產環境應啟用 Managed Identity 並從 Key Vault 動態解析機密,避免明文儲存。
+腳本會建立 resource group、ACR、Storage、AI Search、Key Vault 與 App Service,為 web app 啟用 Managed Identity 並授予 Key Vault 與 ACR 的最小必要角色,把機密寫入 Key Vault,並註冊 GitHub Actions 用的 OIDC federated credential。腳本是 idempotent 的,失敗修正後可直接重跑。
+
+後續部署全自動:
+
+| Workflow | 觸發 | 動作 |
+|---|---|---|
+| [ci.yml](.github/workflows/ci.yml) | push / PR to main | black、isort、flake8、mypy、pytest (≥70% 覆蓋率)、前端 tsc + build |
+| [deploy-backend.yml](.github/workflows/deploy-backend.yml) | `backend/**` 變更 | build image → ACR → App Service → 輪詢健康檢查 |
+| [deploy-frontend.yml](.github/workflows/deploy-frontend.yml) | `frontend/**` 變更 | Vite build → Static Web Apps |
+
+部署認證使用 **OIDC federated credential**:GitHub 為每次 workflow run 簽發短效期 token 換取 Azure access token,儲存庫內因此沒有任何長期有效的密碼。
+
+後端部署會在重啟後輪詢 `/api/health/` 最多 5 分鐘,健康檢查沒通過就算部署失敗——只確認「映像推送成功」會把容器啟動失敗的部署誤判為綠燈。
+
+完整步驟、成本明細($20–25/月)與疑難排解見 **[docs/DEPLOYMENT.md](./docs/DEPLOYMENT.md)**。
+
+### 建立 demo 資料
+
+```bash
+DEMO_PASSWORD='<password>' python manage.py seed_demo
+```
+
+索引一組說明本系統架構的語料,讓線上 demo 能回答關於自己的問題。指令為 idempotent,且拒絕在未設定 `DEMO_PASSWORD` 時以預設密碼建立公開帳號。
+
+## 工程實踐
+
+本專案全程使用 Claude Code 進行 AI 輔助開發,[CLAUDE.md](./CLAUDE.md) 定義了所有 AI 產出程式碼必須遵循的安全與品質規範。AI 加速了實作,但不放寬驗收標準:
+
+- **格式與靜態分析**:black(88 字元)、isort、flake8、mypy,CI 強制
+- **測試**:96 個測試、91% 覆蓋率,CI 以 `--cov-fail-under=70` 設下門檻。所有 Azure SDK 呼叫皆 mock,測試絕不呼叫付費 API
+- **型別註解**:所有公開函數與方法標註型別
+- **人工複審範圍**:資安邏輯(認證、授權、加密)、資料庫 migration、IaC 與生產環境設定變更一律人工複審後才使用
+- **Commit 規範**:Conventional Commits
 
 ## 授權
 
-MIT License
+MIT License — 見 [LICENSE](./LICENSE)
