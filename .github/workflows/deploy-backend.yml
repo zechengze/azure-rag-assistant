@@ -1,0 +1,107 @@
+# 後端持續部署 — build image → ACR → App Service
+#
+# 認證使用 Azure OIDC federated credential：GitHub 為每次 workflow run 簽發
+# 短效期 token 換取 Azure access token，儲存庫內因此不存在任何長期有效的
+# service principal 密碼。設定步驟見 docs/DEPLOYMENT.md。
+#
+# 需要的 repository variables:  AZURE_RESOURCE_GROUP, ACR_NAME, WEBAPP_NAME
+# 需要的 repository secrets:    AZURE_CLIENT_ID, AZURE_TENANT_ID,
+#                              AZURE_SUBSCRIPTION_ID
+
+name: Deploy Backend
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - ".github/workflows/deploy-backend.yml"
+  workflow_dispatch:
+
+permissions:
+  id-token: write # OIDC token 簽發
+  contents: read
+
+# 同時只允許一次部署，且不取消進行中的部署——
+# 中途取消 az webapp 設定變更可能留下處於半套狀態的容器設定。
+concurrency:
+  group: deploy-backend
+  cancel-in-progress: false
+
+env:
+  IMAGE_NAME: azure-rag-assistant
+
+jobs:
+  deploy:
+    name: Build and deploy to App Service
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Log in to container registry
+        run: az acr login --name "${{ vars.ACR_NAME }}"
+
+      - name: Build and push image
+        run: |
+          set -euo pipefail
+          IMAGE="${{ vars.ACR_NAME }}.azurecr.io/${IMAGE_NAME}"
+          # 同時標記 commit SHA 與 latest：SHA 標籤讓每次部署可精確追溯與回滾，
+          # latest 供手動 az webapp create / 本地拉取使用。
+          docker build \
+            --tag "${IMAGE}:${GITHUB_SHA}" \
+            --tag "${IMAGE}:latest" \
+            ./backend
+          docker push "${IMAGE}:${GITHUB_SHA}"
+          docker push "${IMAGE}:latest"
+
+      - name: Point App Service at the new image
+        run: |
+          set -euo pipefail
+          az webapp config container set \
+            --name "${{ vars.WEBAPP_NAME }}" \
+            --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
+            --container-image-name \
+              "${{ vars.ACR_NAME }}.azurecr.io/${IMAGE_NAME}:${GITHUB_SHA}"
+
+      - name: Restart to pull the new image
+        run: |
+          az webapp restart \
+            --name "${{ vars.WEBAPP_NAME }}" \
+            --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}"
+
+      # 部署後驗證：容器要真的起得來才算部署成功。缺少這步時，映像推送成功
+      # 但應用程式啟動失敗的部署會被誤判為綠燈。
+      - name: Wait for health check
+        run: |
+          set -uo pipefail
+          URL="https://${{ vars.WEBAPP_NAME }}.azurewebsites.net/api/health/"
+          for attempt in $(seq 1 30); do
+            code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 "$URL" || true)
+            if [ "$code" = "200" ]; then
+              echo "健康檢查通過 (嘗試 ${attempt} 次)"
+              exit 0
+            fi
+            echo "嘗試 ${attempt}/30 — HTTP ${code}，10 秒後重試"
+            sleep 10
+          done
+          echo "::error::健康檢查在 5 分鐘內未通過，部署視為失敗"
+          exit 1
+
+      - name: Show container logs on failure
+        if: failure()
+        run: |
+          az webapp log tail \
+            --name "${{ vars.WEBAPP_NAME }}" \
+            --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
+            --provider docker &
+          sleep 30
+          kill %1 || true
