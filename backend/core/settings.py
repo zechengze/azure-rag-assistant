@@ -159,6 +159,9 @@ AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT = config(
 AZURE_DOCUMENT_INTELLIGENCE_KEY = get_secret(
     "AZURE_DOCUMENT_INTELLIGENCE_KEY", default=""
 )
+# 單次分析的頁數上限。prebuilt-layout 依頁計費 (約 $0.01/頁),而上傳端只限制
+# 檔案大小 (10 MB),純文字 PDF 可達上千頁 — 沒有這個上限,單次上傳即可燒掉數美元。
+AZURE_DOCUMENT_INTELLIGENCE_MAX_PAGES = 20
 
 # RAG 參數
 RAG_CHUNK_SIZE = 512  # tokens per chunk

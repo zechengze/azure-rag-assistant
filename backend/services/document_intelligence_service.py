@@ -59,20 +59,25 @@ class AzureDocumentIntelligenceService:
         """
         使用 prebuilt-layout 模型分析 PDF,回傳 Markdown 格式的全文 (含表格)。
 
+        只分析前 AZURE_DOCUMENT_INTELLIGENCE_MAX_PAGES 頁以限制計費頁數;
+        超出時記錄 warning。
+
         Args:
             file_bytes: PDF 檔案的原始 bytes
 
         Returns:
-            Markdown 格式的文件內容
+            Markdown 格式的文件內容 (最多前 MAX_PAGES 頁)
 
         Raises:
             DocumentIntelligenceServiceError: Azure 服務呼叫失敗
         """
+        max_pages = settings.AZURE_DOCUMENT_INTELLIGENCE_MAX_PAGES
         try:
             poller = self._client.begin_analyze_document(
                 model_id=self.MODEL_ID,
                 body=AnalyzeDocumentRequest(bytes_source=file_bytes),
                 output_content_format="markdown",
+                pages=f"1-{max_pages}",
             )
             result = poller.result()
             content = result.content or ""
@@ -82,6 +87,14 @@ class AzureDocumentIntelligenceService:
                 pages,
                 len(content),
             )
+            # 分析頁數剛好等於上限時,原始文件很可能更長而被截斷。
+            # 靜默截斷會讓 RAG 答不出後段內容卻不報錯,因此明確記錄。
+            if pages >= max_pages:
+                logger.warning(
+                    "文件頁數達上限 %d,超出部分未納入索引 "
+                    "(AZURE_DOCUMENT_INTELLIGENCE_MAX_PAGES)",
+                    max_pages,
+                )
             return content
         except AzureError as exc:
             logger.error("Document Intelligence 抽取失敗: %s", exc, exc_info=True)

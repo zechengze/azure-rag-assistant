@@ -66,6 +66,53 @@ class TestDocumentIntelligenceService:
             service.extract_text(b"%PDF-1.4")
 
     @patch("services.document_intelligence_service.DocumentIntelligenceClient")
+    def test_extract_text_caps_pages_to_setting(self, mock_client_cls, settings):
+        """頁數上限必須傳給 Azure,否則按頁計費的成本沒有上界。"""
+        settings.AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT = (
+            "https://test.cognitiveservices.azure.com/"
+        )
+        settings.AZURE_DOCUMENT_INTELLIGENCE_KEY = "test-key"
+        settings.AZURE_DOCUMENT_INTELLIGENCE_MAX_PAGES = 7
+
+        mock_result = MagicMock()
+        mock_result.content = "內容"
+        mock_result.pages = [MagicMock()]
+        mock_poller = MagicMock()
+        mock_poller.result.return_value = mock_result
+        mock_client_cls.return_value.begin_analyze_document.return_value = mock_poller
+
+        AzureDocumentIntelligenceService().extract_text(b"%PDF-1.4")
+
+        _, kwargs = mock_client_cls.return_value.begin_analyze_document.call_args
+        assert kwargs["pages"] == "1-7"
+
+    # settings.LOGGING 對 "services" 設了 propagate=False,記錄不會傳到 root,
+    # caplog 因此攔不到 — 改為直接斷言模組 logger 的呼叫。
+    @patch("services.document_intelligence_service.logger")
+    @patch("services.document_intelligence_service.DocumentIntelligenceClient")
+    def test_extract_text_warns_when_page_cap_reached(
+        self, mock_client_cls, mock_logger, settings
+    ):
+        """達到上限代表可能被截斷 — 必須留下紀錄,不能靜默吞掉後段內容。"""
+        settings.AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT = (
+            "https://test.cognitiveservices.azure.com/"
+        )
+        settings.AZURE_DOCUMENT_INTELLIGENCE_KEY = "test-key"
+        settings.AZURE_DOCUMENT_INTELLIGENCE_MAX_PAGES = 2
+
+        mock_result = MagicMock()
+        mock_result.content = "內容"
+        mock_result.pages = [MagicMock(), MagicMock()]
+        mock_poller = MagicMock()
+        mock_poller.result.return_value = mock_result
+        mock_client_cls.return_value.begin_analyze_document.return_value = mock_poller
+
+        AzureDocumentIntelligenceService().extract_text(b"%PDF-1.4")
+
+        mock_logger.warning.assert_called_once()
+        assert "頁數達上限" in mock_logger.warning.call_args[0][0]
+
+    @patch("services.document_intelligence_service.DocumentIntelligenceClient")
     def test_extract_text_handles_empty_content(self, mock_client_cls, settings):
         settings.AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT = (
             "https://test.cognitiveservices.azure.com/"
