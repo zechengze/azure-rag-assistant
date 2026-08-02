@@ -255,7 +255,11 @@ az webapp config appsettings set \
     THROTTLE_USER="${THROTTLE_USER:-60/hour}" \
     DATABASE_URL="${DATABASE_URL:-sqlite:////home/db.sqlite3}" \
     WEBSITES_PORT=8000 \
+    WEBSITES_ENABLE_APP_SERVICE_STORAGE=true \
   --output none
+# ↑ 自訂容器預設不掛載持久化的 /home;預設資料庫 sqlite:////home/db.sqlite3
+#   依賴這個掛載,關閉時 /home 只是映像內 root 擁有的目錄,非 root 的
+#   appuser 無法寫入,migrate 會在啟動時失敗。
 
 # migrate 放在啟動腳本而非映像 CMD：映像因此保持與環境無關，
 # 同一個 image 可以在本機、CI 與 Azure 用不同的啟動方式跑。
