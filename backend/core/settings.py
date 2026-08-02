@@ -124,6 +124,11 @@ if not DEBUG:
     SECURE_HSTS_SECONDS = 31536000
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
     SECURE_SSL_REDIRECT = True
+    # App Service 在平台層終止 TLS,容器收到的一律是純 HTTP。
+    # 不設此項時 is_secure() 恆為 False,SSL redirect 會把每個請求
+    # 301 到同一個網址形成無限迴圈。容器僅能經 App Service 前端存取,
+    # 信任其 X-Forwarded-Proto 是安全的。
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
     X_FRAME_OPTIONS = "DENY"
