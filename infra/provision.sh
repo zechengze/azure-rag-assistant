@@ -257,12 +257,14 @@ az webapp config appsettings set \
     WEBSITES_PORT=8000 \
   --output none
 
-# migrate 放在啟動指令而非映像 CMD：映像因此保持與環境無關，
+# migrate 放在啟動腳本而非映像 CMD：映像因此保持與環境無關，
 # 同一個 image 可以在本機、CI 與 Azure 用不同的啟動方式跑。
+# 注意：這裡必須是單一路徑，不能是 inline 指令 —— App Service 會對
+# appCommandLine 自行斷詞，巢狀引號會被拆壞，容器以 exit 2 秒退。
 az webapp config set \
   --name "${APP_NAME}" \
   --resource-group "${RESOURCE_GROUP}" \
-  --startup-file "sh -c 'python manage.py migrate --noinput && gunicorn core.wsgi:application --bind 0.0.0.0:8000 --workers 2 --timeout 120 --access-logfile - --error-logfile -'" \
+  --startup-file "/app/startup.sh" \
   --output none
 
 az webapp config set \
