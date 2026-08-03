@@ -168,22 +168,30 @@ gh workflow run deploy-frontend.yml
 
 `seed_demo` 會索引 `backend/api/management/commands/demo_data/` 底下說明本系統架構的語料，讓 demo 能回答關於自己的問題。
 
-由於預設資料庫是 App Service 檔案系統上的 SQLite，指令必須在容器內執行：
+由於預設資料庫是 App Service 檔案系統上的 SQLite，指令必須在容器內執行。
+
+**不要用 `az webapp ssh`**：那需要映像內含 `openssh-server`，而本專案的 `python:3.11-slim` 基底刻意不安裝 sshd（縮小攻擊面）。Kudu 的 `/api/command` 也不行——它跑在另一個容器裡，只共享 `/home`，沒有 `/app` 與應用程式的 Python 環境。
+
+改用啟動腳本執行：設定 `DEMO_PASSWORD` 應用程式設定後，`startup.sh` 會在每次啟動時執行 `seed_demo`。
 
 ```bash
-az webapp ssh --name <your-app-name> --resource-group rg-rag-assistant
+az webapp config appsettings set \
+  --name <your-app-name> --resource-group rg-rag-assistant \
+  --settings DEMO_PASSWORD='<選一個你願意公開的密碼>'
 ```
 
-進入後：
+設定完成會觸發重啟並自動索引。確認結果：
 
 ```bash
-cd /app
-DEMO_PASSWORD='<選一個你願意公開的密碼>' python manage.py seed_demo
+az webapp log download --name <your-app-name> \
+  --resource-group rg-rag-assistant --log-file logs.zip
 ```
 
-改用 PostgreSQL 時可直接在本機執行同一指令（環境變數指向生產服務即可），不需 SSH。
+這個設定**保留著**即可：`seed_demo` 以標題比對略過已索引文件，重跑不會重複產生 embedding 費用，卻能讓 `az group delete` 重建後的 demo 自動恢復。
 
-要更換語料或輪替密碼，加上 `--reset` 重跑；指令本身是 idempotent 的，重複執行不會產生重複文件。
+要更換語料或輪替密碼，改設定值後重啟；需要整批重建時在 `startup.sh` 的指令加上 `--reset`。
+
+改用 PostgreSQL 時可直接在本機執行 `DEMO_PASSWORD=... python manage.py seed_demo`（環境變數指向生產服務即可），不受此限。
 
 最後把 demo 帳密寫進 README，讓面試官不必詢問就能登入。
 
