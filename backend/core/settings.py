@@ -20,23 +20,13 @@ SECRET_KEY = get_secret("SECRET_KEY")
 DEBUG = config("DEBUG", default=False, cast=bool)
 ALLOWED_HOSTS = config("ALLOWED_HOSTS", cast=Csv(), default="localhost,127.0.0.1")
 
-# 健康檢查探針不經公開網域，Host 標頭因此不在白名單內：
-#   - Dockerfile 的 HEALTHCHECK 打 localhost:8000
-#   - App Service 的平台探針以容器私有 IP 存取（如 169.254.130.3:8000）
-# 兩者都會被 Django 擋成 400 DisallowedHost，導致 HEALTHCHECK 永遠不通過，
-# 且每次探測都在日誌留下一筆 ERROR。
+# 健康檢查探針不經公開網域存取，Host 標頭因此不在白名單內。
+# core.middleware.HealthCheckProbeMiddleware 會把該路徑的 Host 改寫為
+# localhost，所以生產環境的白名單也必須含有 localhost 才能通過驗證。
 #
-# 只補上這台容器自己的位址，不放寬為網段或 "*"——這些位址無法從外部路由，
-# 偽造 Host 標頭仍到不了這裡。
-_probe_hosts = ["localhost", "127.0.0.1"]
-try:
-    import socket
-
-    _probe_hosts.append(socket.gethostbyname(socket.gethostname()))
-except OSError:  # 容器無法解析自身主機名時略過，不影響啟動
-    pass
-
-ALLOWED_HOSTS += [h for h in _probe_hosts if h not in ALLOWED_HOSTS]
+# 不放寬為網段或 "*"：探針位址（169.254.130.x）每次重啟可能不同，
+# 但改寫只作用於健康檢查這一條路徑，其餘請求仍需符合白名單。
+ALLOWED_HOSTS += [h for h in ("localhost", "127.0.0.1") if h not in ALLOWED_HOSTS]
 
 INSTALLED_APPS = [
     "django.contrib.auth",
@@ -52,6 +42,9 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
+    # 必須最先執行：其後的 middleware 一旦呼叫 request.get_host()
+    # 就會對探針的 Host 標頭拋出 DisallowedHost。
+    "core.middleware.HealthCheckProbeMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "corsheaders.middleware.CorsMiddleware",
@@ -142,6 +135,10 @@ if not DEBUG:
     SECURE_HSTS_SECONDS = 31536000
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
     SECURE_SSL_REDIRECT = True
+    # 健康檢查探針走純 HTTP 且不帶 X-Forwarded-Proto（Dockerfile 的
+    # HEALTHCHECK 打 localhost、平台探針直連容器位址），沒有這個豁免
+    # 會被 301 轉向,探針因此拿不到真正的 200,形同沒有檢查。
+    SECURE_REDIRECT_EXEMPT = [r"^api/health/$"]
     # App Service 在平台層終止 TLS,容器收到的一律是純 HTTP。
     # 不設此項時 is_secure() 恆為 False,SSL redirect 會把每個請求
     # 301 到同一個網址形成無限迴圈。容器僅能經 App Service 前端存取,

@@ -1,41 +1,46 @@
 """
-ALLOWED_HOSTS 的健康檢查探針例外測試。
+健康檢查探針的 Host 與 SSL 轉向例外測試。
 
-探針不經公開網域存取，Host 標頭因此不在白名單內。少了這些項目，
-Dockerfile 的 HEALTHCHECK 與 App Service 的平台探針都會拿到
-400 DisallowedHost —— 前者永遠不會通過，後者每次探測污染一筆
-ERROR 日誌。此行為只在部署後才看得出來，故以測試釘住。
+App Service 的啟動探針直接以容器私有位址 (169.254.130.x，每次重啟可能
+不同) 存取，Dockerfile 的 HEALTHCHECK 則打 localhost。兩者的 Host 標頭
+都不在白名單內，且不帶 X-Forwarded-Proto。少了這些例外，探針會拿到
+400 DisallowedHost 或 301 轉向 —— 前者每次啟動污染一筆 ERROR 日誌，
+後者讓健康檢查形同虛設。此行為只在部署後才看得出來，故以測試釘住。
 """
 
 from __future__ import annotations
 
-import socket
-
 from django.conf import settings
+from django.test import Client
+
+from core.middleware import HEALTH_PATH
 
 
-class TestAllowedHostsProbeExemptions:
-    def test_loopback_hosts_present(self) -> None:
-        """Dockerfile 的 HEALTHCHECK 以 localhost:8000 存取。"""
+class TestHealthProbeHostExemption:
+    def test_localhost_allowed(self) -> None:
+        """middleware 會把探針的 Host 改寫為 localhost，白名單須接受。"""
         assert "localhost" in settings.ALLOWED_HOSTS
-        assert "127.0.0.1" in settings.ALLOWED_HOSTS
-
-    def test_container_own_address_present(self) -> None:
-        """App Service 平台探針以容器私有 IP 存取（如 169.254.130.3）。"""
-        own_ip = socket.gethostbyname(socket.gethostname())
-        assert own_ip in settings.ALLOWED_HOSTS
 
     def test_no_wildcard(self) -> None:
         """探針例外不得放寬成萬用字元 —— 見 CLAUDE.md 1.4。"""
         assert "*" not in settings.ALLOWED_HOSTS
 
-    def test_probe_hosts_not_duplicated(self) -> None:
+    def test_middleware_runs_first(self) -> None:
         """
-        本機環境下容器位址解析即為 127.0.0.1，已存在者不應重複附加。
+        排序即正確性：SecurityMiddleware 與 CommonMiddleware 都會呼叫
+        request.get_host()，一旦先執行就已經拋出 DisallowedHost。
+        """
+        assert settings.MIDDLEWARE[0] == "core.middleware.HealthCheckProbeMiddleware"
 
-        只檢查探針項目：Django 的 setup_test_environment() 會自行附加
-        一次 testserver，那不在本模組的職責範圍內。
-        """
-        own_ip = socket.gethostbyname(socket.gethostname())
-        for host in ("localhost", "127.0.0.1", own_ip):
-            assert settings.ALLOWED_HOSTS.count(host) == 1, f"{host} 重複出現"
+    def test_health_reachable_with_probe_host(self) -> None:
+        """以容器私有位址當 Host 存取健康檢查，應得 200 而非 400。"""
+        client = Client()
+        response = client.get(HEALTH_PATH, HTTP_HOST="169.254.130.3:8000")
+        assert response.status_code == 200
+        assert response.json() == {"status": "ok"}
+
+    def test_other_paths_still_reject_unknown_host(self) -> None:
+        """例外僅限健康檢查；其餘路徑的白名單驗證不得被削弱。"""
+        client = Client()
+        response = client.get("/api/documents/", HTTP_HOST="169.254.130.3:8000")
+        assert response.status_code == 400
