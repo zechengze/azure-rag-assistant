@@ -39,8 +39,17 @@ class TestHealthProbeHostExemption:
         assert response.status_code == 200
         assert response.json() == {"status": "ok"}
 
+    def test_warmup_path_not_rejected_by_host_check(self) -> None:
+        """
+        App Service 的暖機探針打 /robots933456.txt。應用程式沒有這條
+        路由，回 404 是正確的 —— 重點是不能因為 Host 而變成 400。
+        """
+        client = Client()
+        response = client.get("/robots933456.txt", HTTP_HOST="169.254.130.3:8000")
+        assert response.status_code == 404
+
     def test_other_paths_still_reject_unknown_host(self) -> None:
-        """例外僅限健康檢查；其餘路徑的白名單驗證不得被削弱。"""
+        """例外僅限探針路徑；其餘路徑的白名單驗證不得被削弱。"""
         client = Client()
         response = client.get("/api/documents/", HTTP_HOST="169.254.130.3:8000")
         assert response.status_code == 400
