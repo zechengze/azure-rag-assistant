@@ -302,31 +302,56 @@ az role assignment create \
   --scope "/subscriptions/${SUBSCRIPTION_ID}/resourceGroups/${RESOURCE_GROUP}" \
   --output none 2>/dev/null || true
 
-# subject 綁定 repo 與分支：只有 main 分支的 workflow 能換到 token
-if ! az ad app federated-credential list --id "${CLIENT_ID}" \
-      --query "[?name=='github-main']" --output tsv | grep -q .; then
+ensure_federated_credential() {
+  local name="$1" subject="$2"
+  if az ad app federated-credential list --id "${CLIENT_ID}" \
+       --query "[?name=='${name}']" --output tsv | grep -q .; then
+    echo "  已存在 ${name}"
+    return
+  fi
   az ad app federated-credential create \
     --id "${CLIENT_ID}" \
     --parameters "{
-      \"name\": \"github-main\",
+      \"name\": \"${name}\",
       \"issuer\": \"https://token.actions.githubusercontent.com\",
-      \"subject\": \"repo:${GITHUB_REPO}:ref:refs/heads/main\",
+      \"subject\": \"${subject}\",
       \"audiences\": [\"api://AzureADTokenExchange\"]
     }" --output none
-fi
+  echo "  已建立 ${name}"
+}
 
-# GitHub Environment 為 production 時，OIDC subject 會改為 environment 形式，
-# 因此兩種 subject 都要註冊，否則 workflow 會拿不到 token。
-if ! az ad app federated-credential list --id "${CLIENT_ID}" \
-      --query "[?name=='github-env-production']" --output tsv | grep -q .; then
-  az ad app federated-credential create \
-    --id "${CLIENT_ID}" \
-    --parameters "{
-      \"name\": \"github-env-production\",
-      \"issuer\": \"https://token.actions.githubusercontent.com\",
-      \"subject\": \"repo:${GITHUB_REPO}:environment:production\",
-      \"audiences\": [\"api://AzureADTokenExchange\"]
-    }" --output none
+# GitHub 現以「immutable ID」形式簽發 OIDC subject：
+#   repo:<owner>@<owner_id>/<repo>@<repo_id>:environment:production
+# 與可讀形式 repo:<owner>/<repo>:... 不同，只註冊後者會得到 AADSTS700213。
+# 兩種都註冊：可讀形式仍適用於較舊的租戶設定，多註冊沒有成本。
+GH_META=$(curl -fsSL "https://api.github.com/repos/${GITHUB_REPO}" 2>/dev/null || true)
+GH_IDS=$(
+  printf '%s' "${GH_META}" | python3 -c \
+    'import sys,json;d=json.load(sys.stdin);print(d["owner"]["id"],d["id"])' \
+    2>/dev/null || true
+)
+
+# subject 綁定 repo 與分支/environment：只有 main 分支或 production
+# environment 的 workflow 能換到 token
+ensure_federated_credential "github-main" \
+  "repo:${GITHUB_REPO}:ref:refs/heads/main"
+# workflow 使用 environment: production 時 subject 會改為 environment 形式
+ensure_federated_credential "github-env-production" \
+  "repo:${GITHUB_REPO}:environment:production"
+
+if [[ -n "${GH_IDS}" ]]; then
+  read -r OWNER_ID REPO_ID <<<"${GH_IDS}"
+  GH_OWNER="${GITHUB_REPO%%/*}"
+  GH_NAME="${GITHUB_REPO##*/}"
+  IMMUTABLE_PREFIX="repo:${GH_OWNER}@${OWNER_ID}/${GH_NAME}@${REPO_ID}"
+  ensure_federated_credential "github-main-immutable" \
+    "${IMMUTABLE_PREFIX}:ref:refs/heads/main"
+  ensure_federated_credential "github-env-production-immutable" \
+    "${IMMUTABLE_PREFIX}:environment:production"
+else
+  echo "  警告：查不到 ${GITHUB_REPO} 的數值 ID（repo 為私有或無網路？）," >&2
+  echo "        未註冊 immutable 形式的 subject。若 workflow 出現" >&2
+  echo "        AADSTS700213，請從錯誤訊息中的 subject 手動補註冊。" >&2
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────

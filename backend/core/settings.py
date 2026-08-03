@@ -20,6 +20,24 @@ SECRET_KEY = get_secret("SECRET_KEY")
 DEBUG = config("DEBUG", default=False, cast=bool)
 ALLOWED_HOSTS = config("ALLOWED_HOSTS", cast=Csv(), default="localhost,127.0.0.1")
 
+# 健康檢查探針不經公開網域，Host 標頭因此不在白名單內：
+#   - Dockerfile 的 HEALTHCHECK 打 localhost:8000
+#   - App Service 的平台探針以容器私有 IP 存取（如 169.254.130.3:8000）
+# 兩者都會被 Django 擋成 400 DisallowedHost，導致 HEALTHCHECK 永遠不通過，
+# 且每次探測都在日誌留下一筆 ERROR。
+#
+# 只補上這台容器自己的位址，不放寬為網段或 "*"——這些位址無法從外部路由，
+# 偽造 Host 標頭仍到不了這裡。
+_probe_hosts = ["localhost", "127.0.0.1"]
+try:
+    import socket
+
+    _probe_hosts.append(socket.gethostbyname(socket.gethostname()))
+except OSError:  # 容器無法解析自身主機名時略過，不影響啟動
+    pass
+
+ALLOWED_HOSTS += [h for h in _probe_hosts if h not in ALLOWED_HOSTS]
+
 INSTALLED_APPS = [
     "django.contrib.auth",
     "django.contrib.contenttypes",
