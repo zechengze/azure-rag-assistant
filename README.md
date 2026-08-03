@@ -1,20 +1,20 @@
 # Azure RAG Knowledge Assistant
 
-[![CI](https://github.com/OWNER/REPO/actions/workflows/ci.yml/badge.svg)](https://github.com/OWNER/REPO/actions/workflows/ci.yml)
-[![Deploy Backend](https://github.com/OWNER/REPO/actions/workflows/deploy-backend.yml/badge.svg)](https://github.com/OWNER/REPO/actions/workflows/deploy-backend.yml)
+[![CI](https://github.com/zechengze/azure-rag-assistant/actions/workflows/ci.yml/badge.svg)](https://github.com/zechengze/azure-rag-assistant/actions/workflows/ci.yml)
+[![Deploy Backend](https://github.com/zechengze/azure-rag-assistant/actions/workflows/deploy-backend.yml/badge.svg)](https://github.com/zechengze/azure-rag-assistant/actions/workflows/deploy-backend.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
 
 企業級知識問答系統,整合 Azure OpenAI、Azure AI Search、Azure Document Intelligence 與 RAG (Retrieval-Augmented Generation) 技術。全程使用 Claude Code 進行 AI 輔助開發,作為 AZ-204 認證備考實作專案。
 
-> **建立 repo 後請替換上方 badge 的 `OWNER/REPO`**,以及下方的 Live Demo 網址與帳密。設定步驟見 [docs/GITHUB_SETUP.md](./docs/GITHUB_SETUP.md)。
-
 ## 線上 Demo
 
-**https://REPLACE-WITH-YOUR-SWA-URL.azurestaticapps.net**
+**https://proud-sea-027c74800.7.azurestaticapps.net**
 
 | 帳號 | 密碼 |
 |---|---|
-| `demo` | `REPLACE-ME` |
+| `demo` | `RagDemo2026` |
+
+> 這是公開的展示帳號,密碼刻意公開。可自由上傳文件試用,亦已設定限流與費用上限。
 
 登入後知識庫已預先索引三份說明本系統架構的文件,可以直接提問,例如:
 
