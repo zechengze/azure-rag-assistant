@@ -1,4 +1,4 @@
-import { ChangeEvent, DragEvent, useCallback, useRef, useState } from "react";
+import { type JSX, ChangeEvent, DragEvent, useCallback, useRef, useState } from "react";
 
 const API_BASE = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 const MAX_SIZE_MB = 10;

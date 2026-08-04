@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { type JSX, useCallback, useState } from "react";
 
 import { ChatInterface } from "../components/ChatInterface";
 import { DocumentList } from "../components/DocumentList";

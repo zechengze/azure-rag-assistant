@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { type JSX, useState, useRef, useEffect, useCallback } from "react";
 
 interface Message {
   id: string;
@@ -84,7 +84,9 @@ export function ChatInterface(): JSX.Element {
       let accumulated = "";
 
       if (reader) {
-        while (true) {
+        // for(;;) 而非 while(true)：兩者等價，但後者觸發 ESLint 的
+        // no-constant-condition，使 `npm run lint` 無法通過。
+        for (;;) {
           const { done, value } = await reader.read();
           if (done) break;
 
