@@ -22,10 +22,10 @@ jobs:
     # (pytest.ini 指定為 DJANGO_SETTINGS_MODULE),該模組強制覆寫所有
     # Azure 值為佔位字串。CI 因此不需要、也不應該持有任何真實金鑰。
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
@@ -56,10 +56,10 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "20"
           cache: npm
