@@ -5,7 +5,9 @@ API Views — 知識問答與文件管理端點。
 
 from __future__ import annotations
 
+import json
 import logging
+from typing import Any
 
 from django.http import StreamingHttpResponse
 from rest_framework import status
@@ -27,6 +29,21 @@ from services.openai_service import AzureOpenAIService, OpenAIServiceError
 from services.search_service import AzureSearchService, SearchServiceError
 
 logger = logging.getLogger(__name__)
+
+
+def sse_event(payload: dict[str, Any]) -> str:
+    """
+    將單一事件序列化為 SSE 幀,payload 一律走 JSON。
+
+    不能直接寫 `data: {token}` — SSE 以換行界定欄位,token 內含的換行會把
+    該行之後的內容變成沒有欄位名的行而被接收端丟棄。模型輸出的段落與條列
+    因此整段消失(實測 "第一行\\n\\n1. 項目一" 只會還原成 "第一行1. 項目一")。
+    JSON 序列化把換行轉義為 \\n,每個事件保證是單行。
+
+    結束與錯誤改用結構化欄位而非 [DONE] / [ERROR] 字串哨符,模型輸出剛好
+    等於哨符時也不會被誤判為串流結束。
+    """
+    return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
 class HealthView(APIView):
@@ -140,10 +157,10 @@ class ChatCompletionView(APIView):
                     context_documents=context_documents,
                     conversation_history=conversation_history,
                 ):
-                    yield f"data: {token}\n\n"
-                yield "data: [DONE]\n\n"
+                    yield sse_event({"token": token})
+                yield sse_event({"done": True})
             except OpenAIServiceError as exc:
-                yield f"data: [ERROR] {exc}\n\n"
+                yield sse_event({"error": str(exc)})
 
         response = StreamingHttpResponse(
             event_stream(), content_type="text/event-stream"

@@ -5,6 +5,8 @@ View 整合測試 — 使用 DRF APIClient 覆蓋三個主要端點。
 
 from __future__ import annotations
 
+import json
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -51,6 +53,26 @@ def client(user):
 @pytest.fixture
 def anon_client():
     return APIClient()
+
+
+def parse_sse(body: str) -> list[dict[str, Any]]:
+    """
+    以 SSE 規範解析回應主體,回傳各事件的 JSON payload。
+
+    刻意不用 `"data: xxx" in body` 之類的子字串比對 —— 那種斷言在事件被
+    換行截斷時照樣通過,正是原本的 bug 沒被測到的原因。這裡照規範走:
+    空行分事件、`data:` 行去掉前綴後以換行接回,與瀏覽器端行為一致。
+    """
+    events: list[dict[str, Any]] = []
+    for block in body.split("\n\n"):
+        data_lines = [
+            line[5:].lstrip(" ")
+            for line in block.split("\n")
+            if line.startswith("data:")
+        ]
+        if data_lines:
+            events.append(json.loads("\n".join(data_lines)))
+    return events
 
 
 # ── ChatCompletionView ────────────────────────────────────────────────────────
@@ -125,10 +147,47 @@ class TestChatCompletionView:
         assert resp.status_code == 200
         assert resp["Content-Type"].startswith("text/event-stream")
 
-        body = b"".join(resp.streaming_content).decode("utf-8")
-        assert "data: Hello" in body
-        assert "data: world" in body
-        assert "data: [DONE]" in body
+        events = parse_sse(b"".join(resp.streaming_content).decode("utf-8"))
+        assert [e["token"] for e in events if "token" in e] == ["Hello", " ", "world"]
+        assert events[-1] == {"done": True}
+
+    @patch("api.views.AzureOpenAIService")
+    @patch("api.views.AzureSearchService")
+    def test_chat_streaming_preserves_newlines_in_tokens(
+        self, mock_search_cls, mock_openai_cls, client
+    ):
+        """
+        token 內含換行時,接收端必須能還原出一模一樣的字串。
+
+        換行若直接寫進 `data:` 會被 SSE 當成事件邊界,該行之後的內容遭丟棄 ——
+        模型回答的段落與條列會全部黏成一行,是 demo 中肉眼可見的缺陷。
+        """
+        tokens = ["這是第一行", "\n\n", "1. 項目一", "\n2. 項目二", "結尾"]
+        mock_search_cls.return_value.hybrid_search.return_value = []
+        mock_openai_cls.return_value.chat_completion_stream.return_value = iter(tokens)
+
+        resp = client.post(self.URL, {"query": "hi", "stream": True}, format="json")
+
+        events = parse_sse(b"".join(resp.streaming_content).decode("utf-8"))
+        received = "".join(e["token"] for e in events if "token" in e)
+        assert received == "".join(tokens)
+
+    @patch("api.views.AzureOpenAIService")
+    @patch("api.views.AzureSearchService")
+    def test_chat_streaming_token_may_look_like_sentinel(
+        self, mock_search_cls, mock_openai_cls, client
+    ):
+        """模型輸出剛好等於結束哨符時,不得被誤判為串流結束。"""
+        mock_search_cls.return_value.hybrid_search.return_value = []
+        mock_openai_cls.return_value.chat_completion_stream.return_value = iter(
+            ["[DONE]", "後續內容"]
+        )
+
+        resp = client.post(self.URL, {"query": "hi", "stream": True}, format="json")
+
+        events = parse_sse(b"".join(resp.streaming_content).decode("utf-8"))
+        assert [e["token"] for e in events if "token" in e] == ["[DONE]", "後續內容"]
+        assert events[-1] == {"done": True}
 
     @patch("api.views.AzureOpenAIService")
     @patch("api.views.AzureSearchService")
@@ -144,8 +203,8 @@ class TestChatCompletionView:
         mock_openai_cls.return_value.chat_completion_stream.side_effect = boom
 
         resp = client.post(self.URL, {"query": "hi", "stream": True}, format="json")
-        body = b"".join(resp.streaming_content).decode("utf-8")
-        assert "[ERROR]" in body
+        events = parse_sse(b"".join(resp.streaming_content).decode("utf-8"))
+        assert events[-1]["error"] == "stream blew up"
 
 
 # ── DocumentUploadView ────────────────────────────────────────────────────────

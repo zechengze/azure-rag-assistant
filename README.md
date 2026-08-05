@@ -95,8 +95,8 @@ sequenceDiagram
     OA->>AO: chat.completions.create(stream=True)
     AO-->>OA: tokens
     OA-->>V: token iterator
-    V-->>U: SSE data: <token>
-    V-->>U: SSE data: [DONE]
+    V-->>U: SSE data: {"token": "..."}
+    V-->>U: SSE data: {"done": true}
 ```
 
 ## 功能特色

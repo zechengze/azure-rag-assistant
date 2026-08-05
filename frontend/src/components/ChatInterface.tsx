@@ -1,5 +1,7 @@
 import { type JSX, useState, useRef, useEffect, useCallback } from "react";
 
+import { streamChat, type FetchLike } from "../lib/chat";
+
 interface Message {
   id: string;
   role: "user" | "assistant";
@@ -15,6 +17,15 @@ interface ChatState {
 }
 
 const API_BASE = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
+
+const bearerFetch: FetchLike = (input, init) => {
+  const token = localStorage.getItem("access_token");
+  const headers = new Headers(init?.headers);
+  if (token !== null) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
+  return fetch(input, { ...init, headers });
+};
 
 export function ChatInterface(): JSX.Element {
   const [state, setState] = useState<ChatState>({
@@ -61,63 +72,25 @@ export function ChatInterface(): JSX.Element {
     setQuery("");
 
     try {
-      const token = localStorage.getItem("access_token");
-      const response = await fetch(`${API_BASE}/api/chat/`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
+      await streamChat({
+        fetchFn: bearerFetch,
+        apiBase: API_BASE,
+        query: trimmed,
+        history: buildHistory(state.messages),
+        onToken: (accumulated) => {
+          setState((prev) => ({
+            ...prev,
+            messages: prev.messages.map((m) =>
+              m.id === assistantMessage.id ? { ...m, content: accumulated } : m,
+            ),
+          }));
         },
-        body: JSON.stringify({
-          query: trimmed,
-          history: buildHistory(state.messages),
-          stream: true,
-        }),
       });
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-
-      const reader = response.body?.getReader();
-      const decoder = new TextDecoder();
-      let accumulated = "";
-
-      if (reader) {
-        // for(;;) 而非 while(true)：兩者等價，但後者觸發 ESLint 的
-        // no-constant-condition，使 `npm run lint` 無法通過。
-        for (;;) {
-          const { done, value } = await reader.read();
-          if (done) break;
-
-          const chunk = decoder.decode(value, { stream: true });
-          const lines = chunk.split("\n");
-
-          for (const line of lines) {
-            if (line.startsWith("data: ")) {
-              const data = line.slice(6);
-              if (data === "[DONE]") break;
-              if (data.startsWith("[ERROR]")) {
-                throw new Error(data.slice(8));
-              }
-              accumulated += data;
-              setState((prev) => ({
-                ...prev,
-                messages: prev.messages.map((m) =>
-                  m.id === assistantMessage.id
-                    ? { ...m, content: accumulated }
-                    : m
-                ),
-              }));
-            }
-          }
-        }
-      }
 
       setState((prev) => ({
         ...prev,
         messages: prev.messages.map((m) =>
-          m.id === assistantMessage.id ? { ...m, isStreaming: false } : m
+          m.id === assistantMessage.id ? { ...m, isStreaming: false } : m,
         ),
         isLoading: false,
       }));
@@ -154,9 +127,7 @@ export function ChatInterface(): JSX.Element {
         ))}
 
         {state.error && (
-          <div className="text-red-500 text-sm text-center py-2">
-            {state.error}
-          </div>
+          <div className="text-red-500 text-sm text-center py-2">{state.error}</div>
         )}
 
         <div ref={bottomRef} />
@@ -184,9 +155,7 @@ export function ChatInterface(): JSX.Element {
             {state.isLoading ? "處理中..." : "送出"}
           </button>
         </div>
-        <p className="text-xs text-gray-400 text-center mt-2">
-          {query.length}/2000
-        </p>
+        <p className="text-xs text-gray-400 text-center mt-2">{query.length}/2000</p>
       </div>
     </div>
   );
