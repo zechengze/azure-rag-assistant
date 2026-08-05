@@ -40,7 +40,11 @@ export function App(): JSX.Element {
             登出
           </button>
         </header>
-        <DocumentUpload onUploaded={onUploaded} />
+        <DocumentUpload
+          accessToken={auth.accessToken}
+          refresh={auth.refresh}
+          onUploaded={onUploaded}
+        />
         <div className="flex-1 overflow-y-auto px-2 py-2">
           <DocumentList
             documents={docs.documents}
@@ -54,7 +58,7 @@ export function App(): JSX.Element {
 
       {/* Main: chat */}
       <main className="flex-1 bg-gray-50">
-        <ChatInterface />
+        <ChatInterface authFetch={auth.authFetch} />
       </main>
     </div>
   );
@@ -88,10 +92,7 @@ function LoginForm({ onLogin }: LoginFormProps): JSX.Element {
 
   return (
     <div className="flex h-screen items-center justify-center bg-gray-50">
-      <form
-        onSubmit={submit}
-        className="w-80 bg-white rounded-lg shadow p-6 space-y-4"
-      >
+      <form onSubmit={submit} className="w-80 bg-white rounded-lg shadow p-6 space-y-4">
         <h1 className="text-lg font-semibold text-gray-800">
           Azure RAG Knowledge Assistant
         </h1>

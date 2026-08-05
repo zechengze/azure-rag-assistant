@@ -1,5 +1,7 @@
 import { type JSX, ChangeEvent, DragEvent, useCallback, useRef, useState } from "react";
 
+import { uploadDocument, type UploadedDocument } from "../lib/upload";
+
 const API_BASE = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 const MAX_SIZE_MB = 10;
 
@@ -9,14 +11,12 @@ const ALLOWED_MIME = new Set<string>([
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 ]);
 
-export interface UploadedDocument {
-  document_id: string;
-  title: string;
-  chunk_count: number;
-  message: string;
-}
+export type { UploadedDocument };
 
 interface DocumentUploadProps {
+  /** 目前的 access token 與更新函式,皆來自 useAuth。 */
+  accessToken: string | null;
+  refresh: () => Promise<string | null>;
   onUploaded?: (doc: UploadedDocument) => void;
 }
 
@@ -27,7 +27,11 @@ interface UploadState {
   error: string | null;
 }
 
-export function DocumentUpload({ onUploaded }: DocumentUploadProps): JSX.Element {
+export function DocumentUpload({
+  accessToken,
+  refresh,
+  onUploaded,
+}: DocumentUploadProps): JSX.Element {
   const [state, setState] = useState<UploadState>({
     isDragging: false,
     isUploading: false,
@@ -37,7 +41,7 @@ export function DocumentUpload({ onUploaded }: DocumentUploadProps): JSX.Element
   const inputRef = useRef<HTMLInputElement>(null);
 
   const uploadFile = useCallback(
-    (file: File): void => {
+    async (file: File): Promise<void> => {
       setState({ isDragging: false, isUploading: false, progress: 0, error: null });
 
       if (!ALLOWED_MIME.has(file.type)) {
@@ -49,60 +53,40 @@ export function DocumentUpload({ onUploaded }: DocumentUploadProps): JSX.Element
         return;
       }
 
-      const formData = new FormData();
-      formData.append("file", file);
-      formData.append("title", file.name);
-
-      const xhr = new XMLHttpRequest();
-      xhr.upload.addEventListener("progress", (e) => {
-        if (e.lengthComputable) {
-          const pct = Math.round((e.loaded / e.total) * 100);
-          setState((s) => ({ ...s, progress: pct }));
-        }
-      });
-      xhr.addEventListener("load", () => {
-        if (xhr.status === 201) {
-          try {
-            const data = JSON.parse(xhr.responseText) as UploadedDocument;
-            setState({
-              isDragging: false,
-              isUploading: false,
-              progress: 100,
-              error: null,
-            });
-            onUploaded?.(data);
-          } catch {
-            setState((s) => ({ ...s, isUploading: false, error: "回應解析失敗" }));
-          }
-        } else {
-          setState((s) => ({
-            ...s,
-            isUploading: false,
-            error: `上傳失敗 (HTTP ${xhr.status})`,
-          }));
-        }
-      });
-      xhr.addEventListener("error", () => {
-        setState((s) => ({ ...s, isUploading: false, error: "網路錯誤" }));
-      });
-
-      const token = localStorage.getItem("access_token");
-      xhr.open("POST", `${API_BASE}/api/documents/upload/`);
-      if (token !== null) {
-        xhr.setRequestHeader("Authorization", `Bearer ${token}`);
-      }
-
       setState((s) => ({ ...s, isUploading: true, progress: 0 }));
-      xhr.send(formData);
+
+      try {
+        const doc = await uploadDocument({
+          apiBase: API_BASE,
+          file,
+          title: file.name,
+          accessToken,
+          refresh,
+          onProgress: (percent) => setState((s) => ({ ...s, progress: percent })),
+        });
+        setState({
+          isDragging: false,
+          isUploading: false,
+          progress: 100,
+          error: null,
+        });
+        onUploaded?.(doc);
+      } catch (err) {
+        setState((s) => ({
+          ...s,
+          isUploading: false,
+          error: err instanceof Error ? err.message : "上傳失敗",
+        }));
+      }
     },
-    [onUploaded],
+    [accessToken, refresh, onUploaded],
   );
 
   const onFileChange = useCallback(
     (e: ChangeEvent<HTMLInputElement>): void => {
       const file = e.target.files?.[0];
       if (file !== undefined) {
-        uploadFile(file);
+        void uploadFile(file);
       }
       e.target.value = "";
     },
@@ -125,7 +109,7 @@ export function DocumentUpload({ onUploaded }: DocumentUploadProps): JSX.Element
       setState((s) => ({ ...s, isDragging: false }));
       const file = e.dataTransfer.files?.[0];
       if (file !== undefined) {
-        uploadFile(file);
+        void uploadFile(file);
       }
     },
     [uploadFile],
@@ -153,9 +137,7 @@ export function DocumentUpload({ onUploaded }: DocumentUploadProps): JSX.Element
           disabled={state.isUploading}
         />
         <p className="text-sm text-gray-600">
-          {state.isUploading
-            ? `上傳中 ${state.progress}%`
-            : "拖放檔案至此或點擊上傳"}
+          {state.isUploading ? `上傳中 ${state.progress}%` : "拖放檔案至此或點擊上傳"}
         </p>
         <p className="text-xs text-gray-400 mt-1">
           支援 PDF / TXT / DOCX,最大 {MAX_SIZE_MB} MB

@@ -18,16 +18,12 @@ interface ChatState {
 
 const API_BASE = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 
-const bearerFetch: FetchLike = (input, init) => {
-  const token = localStorage.getItem("access_token");
-  const headers = new Headers(init?.headers);
-  if (token !== null) {
-    headers.set("Authorization", `Bearer ${token}`);
-  }
-  return fetch(input, { ...init, headers });
-};
+interface ChatInterfaceProps {
+  /** 來自 useAuth,負責帶上 JWT 並在 401 時更新 token 後重試。 */
+  authFetch: FetchLike;
+}
 
-export function ChatInterface(): JSX.Element {
+export function ChatInterface({ authFetch }: ChatInterfaceProps): JSX.Element {
   const [state, setState] = useState<ChatState>({
     messages: [],
     isLoading: false,
@@ -73,7 +69,7 @@ export function ChatInterface(): JSX.Element {
 
     try {
       await streamChat({
-        fetchFn: bearerFetch,
+        fetchFn: authFetch,
         apiBase: API_BASE,
         query: trimmed,
         history: buildHistory(state.messages),
@@ -102,7 +98,7 @@ export function ChatInterface(): JSX.Element {
         error: err instanceof Error ? err.message : "請求失敗，請稍後再試",
       }));
     }
-  }, [query, state.isLoading, state.messages]);
+  }, [authFetch, query, state.isLoading, state.messages]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
