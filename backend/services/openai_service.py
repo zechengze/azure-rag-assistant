@@ -6,10 +6,18 @@ Azure OpenAI 服務封裝層。
 from __future__ import annotations
 
 import logging
-from typing import Iterator
+from typing import Iterator, cast
 
 from django.conf import settings
-from openai import APIConnectionError, APITimeoutError, AzureOpenAI, RateLimitError
+from openai import (
+    APIConnectionError,
+    APITimeoutError,
+    AzureOpenAI,
+    RateLimitError,
+    Stream,
+)
+from openai.types import CreateEmbeddingResponse
+from openai.types.chat import ChatCompletion, ChatCompletionChunk
 from tenacity import (
     retry,
     retry_if_exception_type,
@@ -21,6 +29,17 @@ logger = logging.getLogger(__name__)
 
 # 可重試的例外類型
 RETRYABLE_EXCEPTIONS = (APIConnectionError, APITimeoutError, RateLimitError)
+
+# 重試策略集中於此,三個 SDK 呼叫共用。
+#
+# reraise=True: 次數用盡後拋出最後一次的原始例外 (而非 tenacity 的
+# RetryError),外層才能照常轉換為 OpenAIServiceError。
+_retry_azure_openai = retry(
+    retry=retry_if_exception_type(RETRYABLE_EXCEPTIONS),
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=2, max=10),
+    reraise=True,
+)
 
 
 class AzureOpenAIService:
@@ -41,11 +60,45 @@ class AzureOpenAIService:
         self._chat_deployment = settings.AZURE_OPENAI_CHAT_DEPLOYMENT
         self._embedding_deployment = settings.AZURE_OPENAI_EMBEDDING_DEPLOYMENT
 
-    @retry(
-        retry=retry_if_exception_type(RETRYABLE_EXCEPTIONS),
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=2, max=10),
-    )
+    # ── 帶重試的 SDK 呼叫 ────────────────────────────────────────────────
+    #
+    # 重試裝飾器必須套在「只做 SDK 呼叫」的方法上,由它原樣拋出
+    # RateLimitError 等可重試例外。若把裝飾器套在對外方法,方法內的
+    # except 會先把例外換成 OpenAIServiceError,tenacity 收到的型別
+    # 不在重試清單內,重試就完全不會發生。
+
+    @_retry_azure_openai
+    def _create_embedding(self, text: str) -> CreateEmbeddingResponse:
+        return self._client.embeddings.create(
+            input=text,
+            model=self._embedding_deployment,
+        )
+
+    @_retry_azure_openai
+    def _create_chat_completion(self, messages: list[dict]) -> ChatCompletion:
+        return self._client.chat.completions.create(
+            model=self._chat_deployment,
+            messages=messages,
+            temperature=0.7,
+            max_tokens=1500,
+        )
+
+    @_retry_azure_openai
+    def _open_chat_stream(self, messages: list[dict]) -> Stream[ChatCompletionChunk]:
+        """只重試「建立串流」這一步 —— 已經吐出 token 後重試會重複輸出。"""
+        stream = self._client.chat.completions.create(
+            model=self._chat_deployment,
+            messages=messages,
+            temperature=0.7,
+            max_tokens=1500,
+            stream=True,
+        )
+        # create() 的回傳型別隨 stream 參數而異,mypy 無法從這裡窄化,
+        # 但 stream=True 時 SDK 必定回傳 Stream。
+        return cast(Stream[ChatCompletionChunk], stream)
+
+    # ── 對外 API ────────────────────────────────────────────────────────
+
     def get_embedding(self, text: str) -> list[float]:
         """
         產生文字的向量嵌入，用於 Azure AI Search 索引與查詢。
@@ -57,25 +110,16 @@ class AzureOpenAIService:
             1536 維度的浮點數向量
 
         Raises:
-            OpenAIServiceError: Azure OpenAI 服務呼叫失敗
+            OpenAIServiceError: Azure OpenAI 服務呼叫失敗（含重試耗盡）
         """
         try:
             # 截斷過長輸入（embedding 模型限制）
-            truncated = text[:8000]
-            response = self._client.embeddings.create(
-                input=truncated,
-                model=self._embedding_deployment,
-            )
+            response = self._create_embedding(text[:8000])
             return response.data[0].embedding
         except Exception as exc:
             logger.error("Embedding 生成失敗: %s", exc, exc_info=True)
             raise OpenAIServiceError(f"Embedding 生成失敗: {exc}") from exc
 
-    @retry(
-        retry=retry_if_exception_type(RETRYABLE_EXCEPTIONS),
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=2, max=10),
-    )
     def chat_completion(
         self,
         user_query: str,
@@ -93,17 +137,15 @@ class AzureOpenAIService:
 
         Returns:
             AI 生成的回答文字
+
+        Raises:
+            OpenAIServiceError: Azure OpenAI 服務呼叫失敗（含重試耗盡）
         """
         try:
             messages = self._build_messages(
                 user_query, context_documents, conversation_history or []
             )
-            response = self._client.chat.completions.create(
-                model=self._chat_deployment,
-                messages=messages,
-                temperature=0.7,
-                max_tokens=1500,
-            )
+            response = self._create_chat_completion(messages)
             answer = response.choices[0].message.content or ""
             logger.info(
                 "Chat completion 成功 | tokens: %d",
@@ -125,18 +167,15 @@ class AzureOpenAIService:
 
         Yields:
             逐 token 的文字片段
+
+        Raises:
+            OpenAIServiceError: Azure OpenAI 服務呼叫失敗（含重試耗盡）
         """
         try:
             messages = self._build_messages(
                 user_query, context_documents, conversation_history or []
             )
-            stream = self._client.chat.completions.create(
-                model=self._chat_deployment,
-                messages=messages,
-                temperature=0.7,
-                max_tokens=1500,
-                stream=True,
-            )
+            stream = self._open_chat_stream(messages)
             for chunk in stream:
                 if chunk.choices and chunk.choices[0].delta.content:
                     yield chunk.choices[0].delta.content

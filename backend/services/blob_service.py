@@ -12,7 +12,7 @@ import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
-from typing import IO
+from typing import IO, Any
 
 from azure.core.exceptions import AzureError, ResourceExistsError
 from azure.storage.blob import (
@@ -69,6 +69,26 @@ class AzureBlobService:
         wait=wait_exponential(multiplier=1, min=2, max=10),
         reraise=True,
     )
+    def _upload_blob(self, blob_client: Any, data: bytes, content_type: str) -> None:
+        """
+        實際的上傳呼叫 —— AzureError 原樣往外拋,tenacity 才看得到並重試。
+        裝飾器若套在 upload_document,方法內的 except 會先把例外換成
+        BlobServiceError,重試條件永遠不成立。
+
+        重試只涵蓋這一步:document_id 在外層產生,重試不會換路徑,也不會
+        重跑容器建立。
+        """
+        try:
+            blob_client.upload_blob(
+                data,
+                overwrite=False,
+                content_settings=ContentSettings(content_type=content_type),
+            )
+        except ResourceExistsError:
+            # 前一次嘗試其實已寫入成功、只是回應沒送達。blob 路徑含本次
+            # 呼叫才產生的 UUID,不可能是別人的檔案,視為成功。
+            logger.info("Blob 已存在,視為前次重試已完成: %s", blob_client.blob_name)
+
     def upload_document(
         self,
         file: IO[bytes],
@@ -80,6 +100,9 @@ class AzureBlobService:
 
         Returns:
             (document_id, blob_url) — document_id 為新生成的 UUID hex
+
+        Raises:
+            BlobServiceError: 上傳失敗（含重試耗盡）
         """
         document_id = uuid.uuid4().hex
         blob_path = f"{user_id}/{document_id}/{filename}"
@@ -94,11 +117,7 @@ class AzureBlobService:
 
             blob_client = container_client.get_blob_client(blob_path)
             file.seek(0)
-            blob_client.upload_blob(
-                file.read(),
-                overwrite=False,
-                content_settings=ContentSettings(content_type=content_type),
-            )
+            self._upload_blob(blob_client, file.read(), content_type)
             logger.info(
                 "Blob 上傳完成 | user=%s | document_id=%s | size=%d",
                 user_id,
