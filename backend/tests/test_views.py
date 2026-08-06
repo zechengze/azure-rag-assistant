@@ -378,7 +378,9 @@ class TestDocumentDeleteView:
         mock_blob_cls.return_value.delete_document.assert_called_once_with(
             document_id="del-001", user_id=str(user.id)
         )
-        mock_search_cls.return_value.delete_document.assert_called_once_with("del-001")
+        mock_search_cls.return_value.delete_document.assert_called_once_with(
+            document_id="del-001", user_id=str(user.id)
+        )
 
         doc.refresh_from_db()
         assert doc.is_active is False
@@ -387,8 +389,12 @@ class TestDocumentDeleteView:
         resp = client.delete(self.url("nonexistent"))
         assert resp.status_code == 404
 
-    def test_delete_other_users_doc_returns_404(self, client, other_user, db):
-        Document.objects.create(
+    @patch("api.views.AzureSearchService")
+    @patch("api.views.AzureBlobService")
+    def test_delete_other_users_doc_returns_404(
+        self, mock_blob_cls, mock_search_cls, client, other_user, db
+    ):
+        doc = Document.objects.create(
             document_id="other-001",
             title="Other user doc",
             user=other_user,
@@ -398,6 +404,13 @@ class TestDocumentDeleteView:
         # alice tries to delete bob's document
         resp = client.delete(self.url("other-001"))
         assert resp.status_code == 404
+
+        # 404 只是回應；真正要釘住的是 Azure 上什麼都沒被動到，
+        # 且 bob 的中繼資料仍為有效。
+        mock_blob_cls.return_value.delete_document.assert_not_called()
+        mock_search_cls.return_value.delete_document.assert_not_called()
+        doc.refresh_from_db()
+        assert doc.is_active is True
 
     @patch("api.views.AzureSearchService")
     @patch("api.views.AzureBlobService")

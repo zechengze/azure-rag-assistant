@@ -125,7 +125,9 @@ class Command(BaseCommand):
                 blob_service.delete_document(
                     document_id=document.document_id, user_id=user_id
                 )
-                search_service.delete_document(document.document_id)
+                search_service.delete_document(
+                    document_id=document.document_id, user_id=user_id
+                )
             except (BlobServiceError, SearchServiceError) as exc:
                 # reset 是清理動作，個別文件清不掉不該中斷整批重建。
                 self.stderr.write(

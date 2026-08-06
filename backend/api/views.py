@@ -291,7 +291,7 @@ class DocumentDeleteView(APIView):
             search_service = AzureSearchService()
 
             blob_service.delete_document(document_id=document_id, user_id=user_id)
-            search_service.delete_document(document_id)
+            search_service.delete_document(document_id=document_id, user_id=user_id)
 
             document.is_active = False
             document.save(update_fields=["is_active"])
