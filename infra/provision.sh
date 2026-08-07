@@ -32,7 +32,6 @@ source "${ENV_FILE}"
 : "${RESOURCE_GROUP:?provision.env 未設定 RESOURCE_GROUP}"
 : "${LOCATION:?provision.env 未設定 LOCATION}"
 : "${APP_NAME:?provision.env 未設定 APP_NAME}"
-: "${ACR_NAME:?provision.env 未設定 ACR_NAME}"
 : "${STORAGE_ACCOUNT:?provision.env 未設定 STORAGE_ACCOUNT}"
 : "${SEARCH_SERVICE:?provision.env 未設定 SEARCH_SERVICE}"
 : "${KEY_VAULT:?provision.env 未設定 KEY_VAULT}"
@@ -45,15 +44,10 @@ log "Resource group: ${RESOURCE_GROUP}"
 az group create --name "${RESOURCE_GROUP}" --location "${LOCATION}" --output none
 
 # ─────────────────────────────────────────────────────────────────────────────
-log "Container Registry: ${ACR_NAME}"
-if ! az acr show --name "${ACR_NAME}" --output none 2>/dev/null; then
-  az acr create \
-    --resource-group "${RESOURCE_GROUP}" \
-    --name "${ACR_NAME}" \
-    --sku Basic \
-    --output none
-fi
-
+# 這裡刻意不建立 Azure Container Registry：ACR 即使是 Basic 層也是每月約 $5
+# 的固定費用（與推送次數、儲存量無關），在這個 demo 的帳單裡佔比接近全部。
+# 映像改推 ghcr.io/<owner>/azure-rag-assistant（公開映像不計費），
+# 由 deploy-backend.yml 用 GITHUB_TOKEN 推送，App Service 匿名拉取。
 # ─────────────────────────────────────────────────────────────────────────────
 log "Storage account: ${STORAGE_ACCOUNT}"
 if ! az storage account show \
@@ -191,8 +185,9 @@ fi
 if ! az webapp show \
   --name "${APP_NAME}" \
   --resource-group "${RESOURCE_GROUP}" --output none 2>/dev/null; then
-  # 首次建立先用公開的 hello-world 映像：此時 ACR 內還沒有任何映像，
+  # 首次建立先用公開的 hello-world 映像：此時 ghcr 上還沒有任何映像，
   # 指向不存在的 tag 會讓 web app 卡在啟動失敗狀態。
+  # 真正的映像位址由 deploy-backend.yml 在首次部署時設定。
   az webapp create \
     --name "${APP_NAME}" \
     --resource-group "${RESOURCE_GROUP}" \
@@ -202,7 +197,7 @@ if ! az webapp show \
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
-log "啟用 Managed Identity 並授權存取 Key Vault 與 ACR"
+log "啟用 Managed Identity 並授權存取 Key Vault"
 PRINCIPAL_ID=$(
   az webapp identity assign \
     --name "${APP_NAME}" \
@@ -217,18 +212,13 @@ az role assignment create \
   --scope "${VAULT_SCOPE}" \
   --output none 2>/dev/null || true
 
-ACR_SCOPE=$(az acr show --name "${ACR_NAME}" --query id --output tsv)
-az role assignment create \
-  --assignee "${PRINCIPAL_ID}" \
-  --role "AcrPull" \
-  --scope "${ACR_SCOPE}" \
-  --output none 2>/dev/null || true
-
-# 讓 App Service 以 Managed Identity 拉取映像，而非 ACR admin 帳密
+# 映像放在 ghcr.io 的公開套件，拉取不需要任何憑證，因此必須關掉 Managed
+# Identity 拉取——留著 true 時 App Service 會試圖拿 Azure AD token 去跟
+# ghcr 認證並失敗。從舊的 ACR 設定遷移過來時這步是必要的，不是預設值。
 az resource update \
   --ids "$(az webapp show --name "${APP_NAME}" \
             --resource-group "${RESOURCE_GROUP}" --query id --output tsv)/config/web" \
-  --set properties.acrUseManagedIdentityCreds=true \
+  --set properties.acrUseManagedIdentityCreds=false \
   --output none
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -361,13 +351,16 @@ cat <<EOF
 完成。接著在 GitHub 設定以下項目：
 
 gh variable set AZURE_RESOURCE_GROUP --body "${RESOURCE_GROUP}"
-gh variable set ACR_NAME             --body "${ACR_NAME}"
 gh variable set WEBAPP_NAME          --body "${APP_NAME}"
 gh variable set VITE_API_URL         --body "https://${APP_NAME}.azurewebsites.net"
 
 gh secret set AZURE_CLIENT_ID       --body "${CLIENT_ID}"
 gh secret set AZURE_TENANT_ID       --body "${TENANT_ID}"
 gh secret set AZURE_SUBSCRIPTION_ID --body "${SUBSCRIPTION_ID}"
+
+首次部署後，把 ghcr 套件改為 Public（App Service 是匿名拉取，套件預設為
+private 會讓容器一直拉不到映像）：
+  https://github.com/users/${GITHUB_REPO%%/*}/packages/container/azure-rag-assistant/settings
 
 後端網址：https://${APP_NAME}.azurewebsites.net
 健康檢查：https://${APP_NAME}.azurewebsites.net/api/health/

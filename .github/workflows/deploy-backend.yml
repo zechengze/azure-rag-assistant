@@ -1,10 +1,18 @@
-# 後端持續部署 — build image → ACR → App Service
+# 後端持續部署 — build image → GitHub Container Registry → App Service
 #
 # 認證使用 Azure OIDC federated credential：GitHub 為每次 workflow run 簽發
 # 短效期 token 換取 Azure access token，儲存庫內因此不存在任何長期有效的
 # service principal 密碼。設定步驟見 docs/DEPLOYMENT.md。
 #
-# 需要的 repository variables:  AZURE_RESOURCE_GROUP, ACR_NAME, WEBAPP_NAME
+# 映像推到 ghcr.io 而非 Azure Container Registry：ACR 連 Basic 層都是每月
+# 約 $5 的固定費用（與推送次數無關），對一個 demo 專案而言那是整份帳單的
+# 大頭；ghcr.io 的公開映像則不計費。推送用的是 workflow 自動簽發的
+# GITHUB_TOKEN，因此同樣不需要在儲存庫存放 registry 帳密。
+#
+# App Service 以「匿名」方式拉取，所以 ghcr 上的套件必須設為 Public——
+# 首次推送後需手動改一次可見性，見 docs/DEPLOYMENT.md 步驟 4。
+#
+# 需要的 repository variables:  AZURE_RESOURCE_GROUP, WEBAPP_NAME
 # 需要的 repository secrets:    AZURE_CLIENT_ID, AZURE_TENANT_ID,
 #                              AZURE_SUBSCRIPTION_ID
 
@@ -21,6 +29,7 @@ on:
 permissions:
   id-token: write # OIDC token 簽發
   contents: read
+  packages: write # 推送映像至 ghcr.io
 
 # 同時只允許一次部署，且不取消進行中的部署——
 # 中途取消 az webapp 設定變更可能留下處於半套狀態的容器設定。
@@ -29,6 +38,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
+  REGISTRY: ghcr.io
   IMAGE_NAME: azure-rag-assistant
 
 jobs:
@@ -48,12 +58,19 @@ jobs:
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Log in to container registry
-        run: az acr login --name "${{ vars.ACR_NAME }}"
+        run: |
+          set -euo pipefail
+          echo "${{ secrets.GITHUB_TOKEN }}" \
+            | docker login "${REGISTRY}" \
+                --username "${{ github.actor }}" --password-stdin
 
       - name: Build and push image
         run: |
           set -euo pipefail
-          IMAGE="${{ vars.ACR_NAME }}.azurecr.io/${IMAGE_NAME}"
+          # ghcr 的映像路徑一律小寫，GitHub 帳號名稱卻允許大寫字母。
+          OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          IMAGE="${REGISTRY}/${OWNER}/${IMAGE_NAME}"
+          echo "IMAGE=${IMAGE}" >> "${GITHUB_ENV}"
           # 同時標記 commit SHA 與 latest：SHA 標籤讓每次部署可精確追溯與回滾，
           # latest 供手動 az webapp create / 本地拉取使用。
           docker build \
@@ -66,11 +83,14 @@ jobs:
       - name: Point App Service at the new image
         run: |
           set -euo pipefail
+          # 必須一併指定 registry url：App Service 不會從映像名稱推斷 registry，
+          # 沿用上一次的設定（ACR）會讓拉取指向錯誤的主機。
+          # 公開映像不需帳密，故不傳 --container-registry-user/password。
           az webapp config container set \
             --name "${{ vars.WEBAPP_NAME }}" \
             --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
-            --container-image-name \
-              "${{ vars.ACR_NAME }}.azurecr.io/${IMAGE_NAME}:${GITHUB_SHA}"
+            --container-image-name "${IMAGE}:${GITHUB_SHA}" \
+            --container-registry-url "https://${REGISTRY}"
 
       - name: Restart to pull the new image
         run: |

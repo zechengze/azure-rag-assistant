@@ -11,7 +11,7 @@
 | 元件 | 服務 / 方案 | 約略月費 |
 |---|---|---|
 | 後端 | App Service Linux Container，B1 | ~$13 |
-| 容器映像 | Container Registry，Basic | ~$5 |
+| 容器映像 | GitHub Container Registry，**公開套件** | $0 |
 | 向量檢索 | AI Search，**Free**（50 MB、3 索引） | $0 |
 | 檔案儲存 | Storage Account，Standard_LRS | < $1 |
 | 機密管理 | Key Vault（依交易計費） | < $1 |
@@ -19,7 +19,9 @@
 | 資料庫 | App Service 檔案系統上的 SQLite | $0 |
 | AI 推論 | Azure OpenAI，按 token 計費 | demo 流量下 ~$1–3 |
 
-合計約 **$20–25/月**。實際金額依區域與用量而異，請以 Azure Pricing Calculator 與帳單為準。
+合計約 **$15–20/月**，其中 App Service plan 佔九成以上。實際金額依區域與用量而異，請以 Azure Pricing Calculator 與帳單為準。
+
+**為什麼不用 Azure Container Registry**：ACR 連最低的 Basic 層都是每月約 $5 的**固定**費用，與推送次數、儲存量都無關。這個專案一個月推不到幾次映像，卻要為此付掉整體帳單的一大塊——實測某個月的帳單裡 ACR 佔了 98%。改推 ghcr.io 的公開套件後這一項歸零，代價只是映像必須公開（對一個本來就開源的作品集專案而言不是代價）。用 ACR 的理由通常是 Managed Identity 拉取、私有網路、與 Azure 的區域親和性——demo 環境都用不到。
 
 **資料庫的取捨**：預設用 `/home` 上的 SQLite（App Service 的 `/home` 是持久化儲存），月費為零。要在面試中示範 Azure Database for PostgreSQL，把 `provision.env` 的 `DATABASE_URL` 指向 Flexible Server（B1ms 約 $13/月）即可，程式碼不需改動——`dj_database_url` 直接吃連線字串。
 
@@ -50,7 +52,7 @@ Azure OpenAI 與 Document Intelligence 沒有納入 `provision.sh`，因為區�
 cp infra/provision.env.example infra/provision.env
 ```
 
-編輯 `infra/provision.env`，填入步驟 1 的值與各項全域唯一名稱（ACR、Storage、Key Vault 的名稱在整個 Azure 中不可重複）。`provision.env` 已列入 `.gitignore`。
+編輯 `infra/provision.env`，填入步驟 1 的值與各項全域唯一名稱（Storage、Key Vault 的名稱在整個 Azure 中不可重複）。`provision.env` 已列入 `.gitignore`。
 
 ```bash
 az login
@@ -58,9 +60,9 @@ az account set --subscription "<your-subscription>"
 ./infra/provision.sh
 ```
 
-腳本是 idempotent 的，中途失敗修正後可直接重跑。它會建立 resource group、ACR、Storage、AI Search、Key Vault、App Service（含 plan），並且：
+腳本是 idempotent 的，中途失敗修正後可直接重跑。它會建立 resource group、Storage、AI Search、Key Vault、App Service（含 plan），並且：
 
-- 為 web app 啟用 **Managed Identity**，授予 Key Vault 的 `Key Vault Secrets User` 與 ACR 的 `AcrPull`，且設定以 Managed Identity 拉取映像而非 ACR admin 帳密
+- 為 web app 啟用 **Managed Identity**，授予 Key Vault 的 `Key Vault Secrets User`（映像放在 ghcr 公開套件，拉取不需憑證，因此腳本會把 `acrUseManagedIdentityCreds` 關閉）
 - 把 5 個機密寫入 Key Vault（名稱依 `core/secrets.py` 的規則把底線轉為連字號）
 - 設定 App Service 環境變數，其中 `AZURE_KEY_VAULT_URL` 一設定，應用程式就改從 Key Vault 解析機密
 - 建立 **OIDC federated credential** 供 GitHub Actions 使用
@@ -81,7 +83,6 @@ Federated credential 讓 GitHub 為每次 workflow run 簽發短效期 token，�
 
 ```bash
 gh variable set AZURE_RESOURCE_GROUP --body "rg-rag-assistant"
-gh variable set ACR_NAME             --body "<your-acr-name>"
 gh variable set WEBAPP_NAME          --body "<your-app-name>"
 gh variable set VITE_API_URL         --body "https://<your-app-name>.azurewebsites.net"
 
@@ -106,7 +107,21 @@ git push origin main
 gh workflow run deploy-backend.yml
 ```
 
-Workflow 會建置映像、推上 ACR、更新 App Service 的容器設定、重啟，然後輪詢 `/api/health/` 最多 5 分鐘。**健康檢查沒通過就算部署失敗**——少了這一步，映像推送成功但容器啟動失敗的部署會被誤判為綠燈。
+Workflow 會建置映像、推上 `ghcr.io/<owner>/azure-rag-assistant`、更新 App Service 的容器設定、重啟，然後輪詢 `/api/health/` 最多 5 分鐘。**健康檢查沒通過就算部署失敗**——少了這一步，映像推送成功但容器啟動失敗的部署會被誤判為綠燈。
+
+### 首次部署後：把套件改為 Public
+
+**這一步不做，第一次部署一定會卡在健康檢查失敗。** ghcr 的套件預設是 private，而 App Service 是以匿名身分拉取映像。
+
+推送成功後（映像存在了，套件才會出現），到：
+
+```
+https://github.com/users/<owner>/packages/container/azure-rag-assistant/settings
+```
+
+在 **Danger Zone → Change package visibility** 改為 **Public**，然後重跑一次 workflow 或重啟 web app。這是一次性設定，之後的部署都不需要再處理。
+
+> 想維持映像私有的話，就得給 App Service 一組有 `read:packages` 權限的 PAT（`--container-registry-user/--container-registry-password`）。那等於在 Azure 上放一組會過期、需要輪替的長期憑證，與本專案「儲存庫內沒有長期密碼」的做法相衝突，所以這裡選擇公開映像。
 
 驗證：
 
@@ -238,10 +253,9 @@ az group delete --name rg-rag-assistant --yes --no-wait
 # App Service（$13/月）— plan 必須一起刪，只刪 webapp 仍會計費
 az webapp delete --name <APP_NAME> --resource-group <RG>
 az appservice plan delete --name asp-<APP_NAME> --resource-group <RG> --yes
-
-# Container Registry（$5/月）
-az acr delete --name <ACR_NAME> --resource-group <RG> --yes
 ```
+
+容器映像放在 ghcr.io，不在 Azure 上，因此不需要（也無從）在這裡刪除；留著也不計費。
 
 Key Vault、Storage、AI Search 免費層、Azure OpenAI（按 token 計費）閒置時幾乎不產生費用，留著即可——也省下重建時的 soft-delete 與免費層額度問題。
 
@@ -255,6 +269,7 @@ Key Vault、Storage、AI Search 免費層、Azure OpenAI（按 token 計費）�
 |---|---|
 | workflow 顯示 `AADSTS70021` 或登入失敗 | federated credential 的 subject 與實際不符。確認 workflow 的 `environment:` 與已註冊的 subject 一致 |
 | 健康檢查一直 503 | 容器啟動失敗。`az webapp log tail --provider docker` 查看；常見原因是 Key Vault 權限尚未生效或機密名稱拼錯 |
+| 容器日誌出現 `unauthorized` 或 `manifest unknown`（ghcr） | ghcr 套件還是 private，或 `acrUseManagedIdentityCreds` 仍為 `true`。前者見步驟 4 改為 Public，後者重跑 `provision.sh` 即會關閉 |
 | 前端能開但 API 全部失敗 | CORS 白名單沒有 SWA 網址，或 `VITE_API_URL` 未設定（bundle 指向 localhost）|
 | 上傳 PDF 失敗、TXT 正常 | Document Intelligence 的 endpoint/key 未設定 |
 | 聊天回 503 | Azure OpenAI 部署名稱與環境變數不符，或配額用盡 |

@@ -120,7 +120,7 @@ sequenceDiagram
 | Azure Key Vault | 機密管理、Managed Identity |
 | Microsoft Identity Platform | MSAL、JWT (`djangorestframework-simplejwt`)、Azure AD |
 | Azure Monitor | Application Insights、結構化日誌 (stdout) |
-| Container Registry | `docker push` 至 ACR,App Service 拉取部署 |
+| Container Registry | `docker push` 至 ghcr.io 公開套件,App Service 匿名拉取部署 |
 
 ## 開發規範
 
@@ -244,14 +244,16 @@ cp infra/provision.env.example infra/provision.env   # 填入設定
 ./infra/provision.sh
 ```
 
-腳本會建立 resource group、ACR、Storage、AI Search、Key Vault 與 App Service,為 web app 啟用 Managed Identity 並授予 Key Vault 與 ACR 的最小必要角色,把機密寫入 Key Vault,並註冊 GitHub Actions 用的 OIDC federated credential。腳本是 idempotent 的,失敗修正後可直接重跑。
+腳本會建立 resource group、Storage、AI Search、Key Vault 與 App Service,為 web app 啟用 Managed Identity 並授予 Key Vault 的最小必要角色,把機密寫入 Key Vault,並註冊 GitHub Actions 用的 OIDC federated credential。腳本是 idempotent 的,失敗修正後可直接重跑。
+
+容器映像放在 GitHub Container Registry 而非 Azure Container Registry——ACR 即使 Basic 層也是每月約 $5 的固定費用,曾佔掉這個 demo 帳單的 98%,而 ghcr 的公開映像不計費。取捨與設定見 [docs/DEPLOYMENT.md](./docs/DEPLOYMENT.md)。
 
 後續部署全自動:
 
 | Workflow | 觸發 | 動作 |
 |---|---|---|
 | [ci.yml](.github/workflows/ci.yml) | push / PR to main | black、isort、flake8、mypy、pytest (≥70% 覆蓋率)、前端 tsc + build |
-| [deploy-backend.yml](.github/workflows/deploy-backend.yml) | `backend/**` 變更 | build image → ACR → App Service → 輪詢健康檢查 |
+| [deploy-backend.yml](.github/workflows/deploy-backend.yml) | `backend/**` 變更 | build image → ghcr.io → App Service → 輪詢健康檢查 |
 | [deploy-frontend.yml](.github/workflows/deploy-frontend.yml) | `frontend/**` 變更 | Vite build → Static Web Apps |
 
 部署認證使用 **OIDC federated credential**:GitHub 為每次 workflow run 簽發短效期 token 換取 Azure access token,儲存庫內因此沒有任何長期有效的密碼。
