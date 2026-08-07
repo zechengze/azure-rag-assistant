@@ -27,6 +27,7 @@ from azure.search.documents.models import VectorizedQuery
 from django.conf import settings
 
 from services.openai_service import AzureOpenAIService
+from services.tenancy import odata_literal, require_tenant
 
 logger = logging.getLogger(__name__)
 
@@ -170,6 +171,16 @@ class AzureSearchService:
 
         return 0
 
+    @staticmethod
+    def _tenant_filter(user_id: str) -> str:
+        """
+        建立租戶隔離條件。
+
+        所有使用者的 chunk 存於同一個索引，這條 filter 是唯一的邊界，因此
+        一律經由此方法產生：值走 odata_literal 跳脫，空租戶當場拒絕。
+        """
+        return f"user_id eq {odata_literal(require_tenant(user_id))}"
+
     def hybrid_search(
         self,
         query: str,
@@ -199,7 +210,7 @@ class AzureSearchService:
             results = self._search_client.search(
                 search_text=query,
                 vector_queries=[vector_query],
-                filter=f"user_id eq '{user_id}'",  # 存取控制過濾
+                filter=self._tenant_filter(user_id),  # 存取控制過濾
                 select=["id", "document_id", "title", "content", "chunk_index"],
                 top=top_k,
             )
@@ -224,13 +235,22 @@ class AzureSearchService:
             logger.error("Azure AI Search 搜尋失敗: %s", exc, exc_info=True)
             raise SearchServiceError(f"搜尋服務失敗: {exc}") from exc
 
-    def delete_document(self, document_id: str) -> None:
-        """刪除指定文件的所有索引 Chunks。"""
+    def delete_document(self, document_id: str, user_id: str) -> None:
+        """
+        刪除指定文件在本租戶底下的所有索引 Chunks。
+
+        user_id 為必填並併入 filter：索引全租戶共用，僅以 document_id 撈取
+        等同於信任呼叫端已驗過擁有者——那層檢查目前只存在於 view，任何新的
+        呼叫點漏做就會跨租戶刪除。租戶條件屬於資料存取層自身的責任。
+        """
         try:
-            # 查詢該文件的所有 chunk
+            # 查詢該文件的所有 chunk（限定本租戶）
             results = self._search_client.search(
                 search_text="*",
-                filter=f"document_id eq '{document_id}'",
+                filter=(
+                    f"document_id eq {odata_literal(document_id)}"
+                    f" and {self._tenant_filter(user_id)}"
+                ),
                 select=["id"],
             )
             chunk_ids = [{"id": r["id"]} for r in results]

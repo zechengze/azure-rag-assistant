@@ -29,6 +29,8 @@ from tenacity import (
     wait_exponential,
 )
 
+from services.tenancy import require_tenant
+
 logger = logging.getLogger(__name__)
 
 
@@ -227,22 +229,18 @@ class AzureBlobService:
             logger.error("擁有者驗證失敗: %s", exc, exc_info=True)
             return False
 
-    def delete_document(self, document_id: str, user_id: str | None = None) -> None:
+    def delete_document(self, document_id: str, user_id: str) -> None:
         """
-        刪除指定 document_id 底下的所有 blob。
-        若提供 user_id 則以前綴精確刪除,否則掃描整個容器 (效能較差,僅作 fallback)。
+        刪除 {user_id}/{document_id}/ 前綴底下的所有 blob。
+
+        user_id 為必填:先前 user_id 省略時會改掃整個容器、以 `/{document_id}/`
+        子字串比對命中的 blob,那條路徑對租戶完全無視——呼叫端一旦漏傳,刪除
+        範圍就跨到別人的檔案上。刪除路徑不保留任何無視租戶的分支。
         """
         try:
             container_client = self._client.get_container_client(self._container_name)
-            if user_id:
-                prefix = f"{user_id}/{document_id}/"
-                blobs = list(container_client.list_blobs(name_starts_with=prefix))
-            else:
-                blobs = [
-                    b
-                    for b in container_client.list_blobs()
-                    if f"/{document_id}/" in b.name
-                ]
+            prefix = f"{require_tenant(user_id)}/{document_id}/"
+            blobs = list(container_client.list_blobs(name_starts_with=prefix))
 
             for blob in blobs:
                 container_client.delete_blob(blob.name)

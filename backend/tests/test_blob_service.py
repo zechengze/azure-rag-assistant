@@ -156,16 +156,44 @@ class TestVerifyOwnerAndDelete:
         )
         mock_container.delete_blob.assert_called_once_with("userid/docid/file.txt")
 
-    def test_delete_document_without_user_id_scans_container(self, mock_blob_sdk):
+    def test_delete_document_requires_user_id(self, mock_blob_sdk):
+        """
+        不得存在「省略 user_id 就掃全容器」的 fallback。
+
+        舊版以 `/{document_id}/` 子字串比對整個容器，命中的可能是其他租戶
+        的 blob；呼叫端漏傳 user_id 時刪除範圍會安靜地跨出本租戶。
+        """
         _, mock_container, _ = mock_blob_sdk
-        match = MagicMock()
-        match.name = "u1/docid/file.txt"
-        nomatch = MagicMock()
-        nomatch.name = "u2/otherdoc/file.txt"
-        mock_container.list_blobs.return_value = [match, nomatch]
         service = AzureBlobService()
-        service.delete_document(document_id="docid")
-        mock_container.delete_blob.assert_called_once_with("u1/docid/file.txt")
+        with pytest.raises(TypeError):
+            service.delete_document(document_id="docid")
+        mock_container.list_blobs.assert_not_called()
+        mock_container.delete_blob.assert_not_called()
+
+    @pytest.mark.parametrize("blank", ["", "   "])
+    def test_delete_document_rejects_blank_user_id(self, mock_blob_sdk, blank):
+        """空 user_id 會讓前綴退化成跨租戶比對，須當場拒絕。"""
+        _, mock_container, _ = mock_blob_sdk
+        service = AzureBlobService()
+        with pytest.raises(ValueError):
+            service.delete_document(document_id="docid", user_id=blank)
+        mock_container.delete_blob.assert_not_called()
+
+    def test_delete_document_never_touches_other_tenants_blobs(self, mock_blob_sdk):
+        """
+        刪除只發給前綴查詢回傳的 blob。
+
+        list_blobs 由 Azure 依 name_starts_with 過濾，此處以「回傳空集合」
+        模擬非擁有者的情況，確認不會退回任何形式的全容器掃描。
+        """
+        _, mock_container, _ = mock_blob_sdk
+        mock_container.list_blobs.return_value = []
+        service = AzureBlobService()
+        service.delete_document(document_id="docid", user_id="not-the-owner")
+        mock_container.list_blobs.assert_called_once_with(
+            name_starts_with="not-the-owner/docid/"
+        )
+        mock_container.delete_blob.assert_not_called()
 
     def test_delete_azure_error_wrapped(self, mock_blob_sdk):
         _, mock_container, _ = mock_blob_sdk

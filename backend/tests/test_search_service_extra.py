@@ -61,12 +61,42 @@ class TestHybridSearch:
         with pytest.raises(SearchServiceError):
             service.hybrid_search(query="x", user_id="u1")
 
-    def test_hybrid_search_filter_includes_user_id(self, search_service_mocked):
+    def test_hybrid_search_filter_is_exactly_the_tenant_condition(
+        self, search_service_mocked
+    ):
+        """
+        比對完整 filter 字串，而非 `"u42" in filter`。
+
+        子字串斷言證明不了隔離：被注入的
+        `user_id eq 'u42' or user_id ne 'x'` 同樣含有 u42，照樣會通過，
+        但那條 filter 會讓整個索引全開。
+        """
         service, mock_search_client, _, _ = search_service_mocked
         mock_search_client.search.return_value = iter([])
         service.hybrid_search(query="x", user_id="u42")
         call_kwargs = mock_search_client.search.call_args.kwargs
-        assert "u42" in call_kwargs["filter"]
+        assert call_kwargs["filter"] == "user_id eq 'u42'"
+
+    def test_hybrid_search_escapes_quote_in_user_id(self, search_service_mocked):
+        """
+        user_id 內的單引號須跳脫，否則可拼出恆真條件而讀到全部租戶。
+
+        目前 user_id 是整數主鍵所以拼不出來，但這個前提沒有任何地方強制
+        （見 CLAUDE.md 1.3 的 Azure AD / MSAL 整合）。
+        """
+        service, mock_search_client, _, _ = search_service_mocked
+        mock_search_client.search.return_value = iter([])
+        service.hybrid_search(query="x", user_id="u1' or user_id ne 'zzz")
+        call_kwargs = mock_search_client.search.call_args.kwargs
+        assert call_kwargs["filter"] == "user_id eq 'u1'' or user_id ne ''zzz'"
+
+    @pytest.mark.parametrize("blank", ["", "   "])
+    def test_hybrid_search_rejects_blank_tenant(self, search_service_mocked, blank):
+        """空租戶會比對不到任何文件而看起來像「沒有資料」，須當場拒絕。"""
+        service, mock_search_client, _, _ = search_service_mocked
+        with pytest.raises(ValueError):
+            service.hybrid_search(query="x", user_id=blank)
+        mock_search_client.search.assert_not_called()
 
 
 class TestIndexDocument:
@@ -105,16 +135,45 @@ class TestDeleteDocument:
         mock_search_client.search.return_value = iter(
             [{"id": "doc1-chunk-0"}, {"id": "doc1-chunk-1"}]
         )
-        service.delete_document("doc1")
+        service.delete_document(document_id="doc1", user_id="u42")
         mock_search_client.delete_documents.assert_called_once()
         deleted = mock_search_client.delete_documents.call_args.kwargs["documents"]
         assert len(deleted) == 2
+
+    def test_delete_document_scopes_lookup_to_owner(self, search_service_mocked):
+        """
+        撈取待刪 chunk 的條件須同時綁定 document_id 與租戶。
+
+        只用 document_id 撈取，等於把隔離責任丟給呼叫端；view 目前有先查
+        擁有者，但那層檢查漏掉時此處不會有任何抵抗。
+        """
+        service, mock_search_client, _, _ = search_service_mocked
+        mock_search_client.search.return_value = iter([])
+        service.delete_document(document_id="doc1", user_id="u42")
+        call_kwargs = mock_search_client.search.call_args.kwargs
+        expected = "document_id eq 'doc1' and user_id eq 'u42'"
+        assert call_kwargs["filter"] == expected
+
+    def test_delete_document_deletes_nothing_across_tenants(
+        self, search_service_mocked
+    ):
+        """租戶條件過濾掉全部 chunk 時不得發出任何 delete。"""
+        service, mock_search_client, _, _ = search_service_mocked
+        mock_search_client.search.return_value = iter([])
+        service.delete_document(document_id="doc1", user_id="not-the-owner")
+        mock_search_client.delete_documents.assert_not_called()
+
+    def test_delete_document_rejects_blank_tenant(self, search_service_mocked):
+        service, mock_search_client, _, _ = search_service_mocked
+        with pytest.raises(ValueError):
+            service.delete_document(document_id="doc1", user_id="")
+        mock_search_client.search.assert_not_called()
 
     def test_delete_document_wraps_azure_error(self, search_service_mocked):
         service, mock_search_client, _, _ = search_service_mocked
         mock_search_client.search.side_effect = AzureError("search down")
         with pytest.raises(SearchServiceError):
-            service.delete_document("doc1")
+            service.delete_document(document_id="doc1", user_id="u42")
 
 
 class TestEnsureIndexExists:
