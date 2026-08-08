@@ -62,7 +62,7 @@ az account set --subscription "<your-subscription>"
 
 腳本是 idempotent 的，中途失敗修正後可直接重跑。它會建立 resource group、Storage、AI Search、Key Vault、App Service（含 plan），並且：
 
-- 為 web app 啟用 **Managed Identity**，授予 Key Vault 的 `Key Vault Secrets User`（映像放在 ghcr 公開套件，拉取不需憑證，因此腳本會把 `acrUseManagedIdentityCreds` 關閉）
+- 為 web app 啟用 **Managed Identity**，授予 Key Vault 的 `Key Vault Secrets User`（映像放在 ghcr 公開套件，拉取不需憑證，故 `acrUseManagedIdentityCreds` 設為關閉；`deploy-backend.yml` 每次部署也會重設，設定漂掉會自己修回來）
 - 把 5 個機密寫入 Key Vault（名稱依 `core/secrets.py` 的規則把底線轉為連字號）
 - 設定 App Service 環境變數，其中 `AZURE_KEY_VAULT_URL` 一設定，應用程式就改從 Key Vault 解析機密
 - 建立 **OIDC federated credential** 供 GitHub Actions 使用
@@ -269,7 +269,7 @@ Key Vault、Storage、AI Search 免費層、Azure OpenAI（按 token 計費）�
 |---|---|
 | workflow 顯示 `AADSTS70021` 或登入失敗 | federated credential 的 subject 與實際不符。確認 workflow 的 `environment:` 與已註冊的 subject 一致 |
 | 健康檢查一直 503 | 容器啟動失敗。`az webapp log tail --provider docker` 查看；常見原因是 Key Vault 權限尚未生效或機密名稱拼錯 |
-| 容器日誌出現 `unauthorized` 或 `manifest unknown`（ghcr） | ghcr 套件還是 private，或 `acrUseManagedIdentityCreds` 仍為 `true`。前者見步驟 4 改為 Public，後者重跑 `provision.sh` 即會關閉 |
+| 容器日誌出現 `unauthorized` 或 `manifest unknown`（ghcr） | ghcr 套件還是 private——見步驟 4 改為 Public。（`acrUseManagedIdentityCreds` 由每次部署自動關閉，不會是原因）|
 | 前端能開但 API 全部失敗 | CORS 白名單沒有 SWA 網址，或 `VITE_API_URL` 未設定（bundle 指向 localhost）|
 | 上傳 PDF 失敗、TXT 正常 | Document Intelligence 的 endpoint/key 未設定 |
 | 聊天回 503 | Azure OpenAI 部署名稱與環境變數不符，或配額用盡 |

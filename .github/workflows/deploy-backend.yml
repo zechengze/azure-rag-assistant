@@ -83,6 +83,18 @@ jobs:
       - name: Point App Service at the new image
         run: |
           set -euo pipefail
+          # 公開映像的拉取不帶任何憑證，因此必須關掉 Managed Identity 拉取——
+          # 留著 true 時 App Service 會拿 Azure AD token 去跟 ghcr 認證並失敗。
+          # 這裡重設而非只靠 provision.sh：這個旗標決定「本步驟剛推的映像拉不
+          # 拉得動」，讓它跟映像位址一起被每次部署收斂，設定漂掉也自己修回來。
+          az resource update \
+            --ids "$(az webapp show \
+                      --name "${{ vars.WEBAPP_NAME }}" \
+                      --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
+                      --query id --output tsv)/config/web" \
+            --set properties.acrUseManagedIdentityCreds=false \
+            --output none
+
           # 必須一併指定 registry url：App Service 不會從映像名稱推斷 registry，
           # 沿用上一次的設定（ACR）會讓拉取指向錯誤的主機。
           # 公開映像不需帳密，故不傳 --container-registry-user/password。
