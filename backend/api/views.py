@@ -220,7 +220,17 @@ class DocumentUploadView(APIView):
                 user_id=user_id,
                 filename=uploaded_file.name,
             )
+        except BlobServiceError as exc:
+            logger.error("文件處理失敗 | user=%s | error=%s", user_id, exc)
+            return Response(
+                {"error": "文件處理失敗,請稍後再試"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
 
+        # blob 已寫入 — 此後任何失敗都必須回收,否則使用者拿到錯誤回應,
+        # blob 卻留在 Storage:沒有 Document 記錄,列表看不到、刪除 API
+        # 也構不著,只能進 Portal 手動清。
+        try:
             uploaded_file.seek(0)
             content = blob_service.extract_text(uploaded_file)
 
@@ -231,37 +241,76 @@ class DocumentUploadView(APIView):
                 content=content,
                 user_id=user_id,
             )
-
-            Document.objects.create(
-                document_id=document_id,
-                title=title,
-                user=request.user,
-                file_size=uploaded_file.size,
-                chunk_count=chunk_count,
-            )
-
-            logger.info(
-                "文件上傳成功 | user=%s | document_id=%s | chunks=%d",
-                user_id,
-                document_id,
-                chunk_count,
-            )
-
-            return Response(
-                {
-                    "document_id": document_id,
-                    "title": title,
-                    "chunk_count": chunk_count,
-                    "message": f"文件已成功索引,共分割為 {chunk_count} 個段落",
-                },
-                status=status.HTTP_201_CREATED,
-            )
-
         except (BlobServiceError, SearchServiceError) as exc:
             logger.error("文件處理失敗 | user=%s | error=%s", user_id, exc)
+            self._cleanup_partial_upload(document_id, user_id)
             return Response(
                 {"error": "文件處理失敗,請稍後再試"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        # 一個 chunk 都沒索引成功的文件無法被檢索,回 201 只是把問題
+        # 往後推 — 使用者要到提問都查不到內容時才會發現。
+        if chunk_count == 0:
+            logger.warning(
+                "文件無可索引內容 | user=%s | document_id=%s", user_id, document_id
+            )
+            self._cleanup_partial_upload(document_id, user_id)
+            return Response(
+                {"error": "無法從文件抽取可索引的文字,請確認文件內容"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        Document.objects.create(
+            document_id=document_id,
+            title=title,
+            user=request.user,
+            file_size=uploaded_file.size,
+            chunk_count=chunk_count,
+        )
+
+        logger.info(
+            "文件上傳成功 | user=%s | document_id=%s | chunks=%d",
+            user_id,
+            document_id,
+            chunk_count,
+        )
+
+        return Response(
+            {
+                "document_id": document_id,
+                "title": title,
+                "chunk_count": chunk_count,
+                "message": f"文件已成功索引,共分割為 {chunk_count} 個段落",
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+    @staticmethod
+    def _cleanup_partial_upload(document_id: str, user_id: str) -> None:
+        """
+        回收半途失敗的上傳(blob 與可能已寫入的部分索引 chunk)。
+
+        Best-effort:清理失敗只記日誌不再往外拋 — 呼叫端正要回傳的
+        原始錯誤比清理失敗更值得讓使用者知道。
+        """
+        try:
+            AzureBlobService().delete_document(document_id=document_id, user_id=user_id)
+        except BlobServiceError as exc:
+            logger.warning(
+                "上傳失敗後的 blob 清理未完成 | document_id=%s | %s",
+                document_id,
+                exc,
+            )
+        try:
+            AzureSearchService().delete_document(
+                document_id=document_id, user_id=user_id
+            )
+        except SearchServiceError as exc:
+            logger.warning(
+                "上傳失敗後的索引清理未完成 | document_id=%s | %s",
+                document_id,
+                exc,
             )
 
 
