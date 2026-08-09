@@ -127,7 +127,9 @@ CORS_ALLOWED_ORIGINS = config(
     cast=Csv(),
     default="http://localhost:5173,http://localhost:3000",
 )
-CORS_ALLOW_CREDENTIALS = True
+# 認證走 Authorization: Bearer 標頭,不用 cookie — 維持預設的
+# CORS_ALLOW_CREDENTIALS = False,萬一日後來源清單設錯也不至於
+# 讓瀏覽器跨站帶上憑證。
 
 # 密碼強度驗證 — Django 未設定時「完全不驗證」。demo 帳號密碼由
 # DEMO_PASSWORD 注入且寫在 README,更需要擋掉過短或全數字的值。
