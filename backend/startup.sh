@@ -21,9 +21,16 @@ if [ -n "${DEMO_PASSWORD:-}" ]; then
 fi
 
 # exec 讓 gunicorn 取代 shell 成為 PID 1,正確接收平台的停止訊號
+#
+# gthread 而非預設 sync:聊天走 SSE 串流,一條回應會佔住 worker 數十秒。
+# sync 模式下 2 個 worker 等於 2 條並發串流就讓整個後端 (含健康檢查)
+# 排隊 — 對外等同免費的 DoS。執行緒模型下同樣的記憶體可同時服務
+# 2×8 條連線,串流期間多數時間在等 Azure OpenAI 的 I/O,GIL 不構成瓶頸。
 exec gunicorn core.wsgi:application \
   --bind 0.0.0.0:8000 \
   --workers 2 \
+  --worker-class gthread \
+  --threads 8 \
   --timeout 120 \
   --access-logfile - \
   --error-logfile -

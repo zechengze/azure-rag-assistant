@@ -46,9 +46,13 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
     CMD curl -fsS http://localhost:8000/api/health/ || exit 1
 
 # Gunicorn 作為 WSGI 伺服器
+# gthread:SSE 串流會長時間佔住連線,sync worker 模式下少量並發串流
+# 就佔滿全部 worker (與 startup.sh 的生產設定一致,理由詳見該檔)
 CMD ["gunicorn", "core.wsgi:application", \
      "--bind", "0.0.0.0:8000", \
      "--workers", "4", \
+     "--worker-class", "gthread", \
+     "--threads", "8", \
      "--timeout", "120", \
      "--access-logfile", "-", \
      "--error-logfile", "-"]
