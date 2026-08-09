@@ -5,6 +5,7 @@ API Serializers — 輸入驗證層。
 
 from __future__ import annotations
 
+import codecs
 import re
 
 from django.conf import settings
@@ -75,18 +76,27 @@ class ChatRequestSerializer(serializers.Serializer):
 class DocumentUploadSerializer(serializers.Serializer):
     """文件上傳序列化器。"""
 
-    ALLOWED_CONTENT_TYPES = {
-        "text/plain",
-        "application/pdf",
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    }
+    PDF_MIME = "application/pdf"
+    TXT_MIME = "text/plain"
+    DOCX_MIME = (
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
+    ALLOWED_CONTENT_TYPES = {TXT_MIME, PDF_MIME, DOCX_MIME}
     MAX_FILE_SIZE_MB = 10
+
+    # 檔案開頭簽名 — content_type 是 client 自報的,單獨採信等於讓任意
+    # bytes 冒名進入後續管線:偽 PDF 會直送 Document Intelligence(依頁
+    # 計費)才失敗。簽名比對在收件當下就把冒名檔案擋成 400。
+    _MAGIC_BYTES = {
+        PDF_MIME: b"%PDF-",
+        DOCX_MIME: b"PK\x03\x04",  # DOCX 是 ZIP 容器
+    }
 
     title = serializers.CharField(min_length=1, max_length=200, trim_whitespace=True)
     file = serializers.FileField()
 
     def validate_file(self, value):
-        """驗證檔案類型與大小。"""
+        """驗證檔案類型（宣告值 + 內容簽名）與大小。"""
         # 驗證 MIME 類型
         content_type = getattr(value, "content_type", "")
         if content_type not in self.ALLOWED_CONTENT_TYPES:
@@ -101,7 +111,31 @@ class DocumentUploadSerializer(serializers.Serializer):
                 f"檔案大小超過限制（最大 {self.MAX_FILE_SIZE_MB} MB）"
             )
 
+        # 驗證內容與宣告的類型一致
+        value.seek(0)
+        head = value.read(4096)
+        value.seek(0)
+        if not self._content_matches(content_type, head):
+            raise serializers.ValidationError("檔案內容與宣告的類型不符")
+
         return value
+
+    @classmethod
+    def _content_matches(cls, content_type: str, head: bytes) -> bool:
+        """檢查檔案開頭是否符合宣告的 MIME 類型。"""
+        magic = cls._MAGIC_BYTES.get(content_type)
+        if magic is not None:
+            return head.startswith(magic)
+
+        # text/plain 沒有簽名可比 — 要求可作為 UTF-8 解碼,與後續
+        # extract_text 的解碼要求一致,提早在 400 而非 500 失敗。
+        # final=False:結尾被 4096 bytes 截斷的多位元組字元不算錯誤。
+        decoder = codecs.getincrementaldecoder("utf-8")()
+        try:
+            decoder.decode(head, False)
+        except UnicodeDecodeError:
+            return False
+        return True
 
 
 class DocumentListSerializer(serializers.Serializer):
