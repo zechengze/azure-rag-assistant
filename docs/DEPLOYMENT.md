@@ -195,6 +195,8 @@ az webapp config appsettings set \
   --settings DEMO_PASSWORD='<選一個你願意公開的密碼>'
 ```
 
+密碼須通過 Django 的強度驗證（至少 8 字元、非常見密碼、非純數字），太弱時 `seed_demo` 會拒絕建立帳號並在日誌說明原因——帳號是公開可登入的，弱密碼等同把 Azure 用量開放給整個網際網路。
+
 設定完成會觸發重啟並自動索引。確認結果：
 
 ```bash
