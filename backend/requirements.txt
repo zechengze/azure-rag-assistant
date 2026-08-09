@@ -34,7 +34,9 @@ python-docx==1.1.2
 tiktoken==0.7.0
 
 # WSGI Server (production)
-gunicorn==22.0.0
+# >=23.0.0: 22.x 有 CVE-2024-6827 (Transfer-Encoding 驗證缺陷,可被用於
+# request smuggling),23.0.0 修復
+gunicorn==23.0.0
 
 # Code Quality
 black==26.5.1
