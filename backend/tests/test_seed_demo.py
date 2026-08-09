@@ -66,6 +66,19 @@ def test_blank_password_aborts(db, monkeypatch):
         call_command("seed_demo")
 
 
+def test_weak_password_aborts(db, monkeypatch):
+    """
+    公開可登入的帳號不得使用弱密碼 — set_password() 不會觸發
+    AUTH_PASSWORD_VALIDATORS,指令須明確驗證。
+    """
+    monkeypatch.setenv("DEMO_PASSWORD", "12345678")  # 純數字 + 常見密碼
+
+    with pytest.raises(CommandError, match="強度不足"):
+        call_command("seed_demo")
+
+    assert not get_user_model().objects.filter(username="demo").exists()
+
+
 def test_index_failure_surfaces_as_command_error(db, monkeypatch, mock_azure):
     """索引初始化失敗須明確中止,不留下半套資料。"""
     _blob_cls, search_cls = mock_azure

@@ -21,6 +21,8 @@ from pathlib import Path
 from typing import Any
 
 from django.contrib.auth import get_user_model
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management.base import BaseCommand, CommandError
 
@@ -101,6 +103,19 @@ class Command(BaseCommand):
     def _ensure_user(self, username: str, password: str) -> Any:
         """建立或更新 demo 使用者，回傳 user 實例。"""
         user_model = get_user_model()
+
+        # set_password() 不會觸發 AUTH_PASSWORD_VALIDATORS（那只掛在
+        # form / serializer 路徑），須明確呼叫 — 這是唯一以程式設定
+        # 「公開可登入帳號」密碼的地方，過短或常見密碼要在這裡擋下。
+        # 以未儲存的 instance 驗證（供相似度比對），密碼不合格時
+        # 不留下任何帳號記錄。
+        try:
+            validate_password(password, user=user_model(username=username))
+        except ValidationError as exc:
+            raise CommandError(
+                f"DEMO_PASSWORD 強度不足: {'; '.join(exc.messages)}"
+            ) from exc
+
         user, created = user_model.objects.get_or_create(username=username)
         # 密碼每次都重設，讓輪替 demo 憑證只需重跑此指令。
         user.set_password(password)
