@@ -105,6 +105,13 @@ REST_FRAMEWORK = {
         "user": config("THROTTLE_USER", default="100/hour"),
         "chat": config("THROTTLE_CHAT", default="30/hour"),
     },
+    # App Service 在容器前終止連線,REMOTE_ADDR 一律是平台前端的位址。
+    # 不設此項時,所有匿名訪客共用同一個 20/hour 配額 — 限流形同虛設,
+    # 且單一濫用者就能把 /api/token/ 對所有人鎖死。設 1 之後 DRF 改取
+    # X-Forwarded-For 最後一跳,那是 App Service 前端附加的真實來源 IP,
+    # 客戶端偽造的值會被推往前面而不被採用。本機直連時無此標頭,
+    # 自動回退 REMOTE_ADDR,行為不變。
+    "NUM_PROXIES": config("DRF_NUM_PROXIES", default=1, cast=int),
     "DEFAULT_FILTER_BACKENDS": [
         "django_filters.rest_framework.DjangoFilterBackend",
         "rest_framework.filters.OrderingFilter",
