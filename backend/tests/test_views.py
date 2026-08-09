@@ -191,20 +191,30 @@ class TestChatCompletionView:
 
     @patch("api.views.AzureOpenAIService")
     @patch("api.views.AzureSearchService")
-    def test_chat_streaming_error_yields_error_event(
+    def test_chat_streaming_error_yields_generic_error_event(
         self, mock_search_cls, mock_openai_cls, client
     ):
+        """
+        串流錯誤事件只能帶通用訊息 — 服務層例外包著 SDK 原始錯誤
+        (端點、部署名稱、request id),那些細節屬於伺服器日誌,
+        不得隨 SSE 送到瀏覽器。
+        """
         mock_search_cls.return_value.hybrid_search.return_value = []
 
         def boom(*args, **kwargs):
-            raise OpenAIServiceError("stream blew up")
+            raise OpenAIServiceError(
+                "串流失敗: https://internal.openai.azure.com deployment=gpt-4.1"
+            )
             yield  # pragma: no cover
 
         mock_openai_cls.return_value.chat_completion_stream.side_effect = boom
 
         resp = client.post(self.URL, {"query": "hi", "stream": True}, format="json")
-        events = parse_sse(b"".join(resp.streaming_content).decode("utf-8"))
-        assert events[-1]["error"] == "stream blew up"
+        body = b"".join(resp.streaming_content).decode("utf-8")
+        events = parse_sse(body)
+        assert "error" in events[-1]
+        assert "internal.openai.azure.com" not in body
+        assert "gpt-4.1" not in body
 
 
 # ── DocumentUploadView ────────────────────────────────────────────────────────
