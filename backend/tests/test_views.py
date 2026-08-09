@@ -336,6 +336,57 @@ class TestDocumentUploadView:
         )
         assert resp.status_code == 201
 
+    @patch("api.views.AzureSearchService")
+    @patch("api.views.AzureBlobService")
+    def test_upload_index_failure_cleans_up_blob(
+        self, mock_blob_cls, mock_search_cls, client, db
+    ):
+        """
+        blob 上傳成功但索引失敗時,必須回收已寫入的 blob —
+        否則使用者收到錯誤,blob 卻無主地留在 Storage(列表看不到、
+        刪除 API 也構不著)。
+        """
+        mock_blob = mock_blob_cls.return_value
+        mock_blob.upload_document.return_value = ("orphan1", "https://blob/x")
+        mock_blob.extract_text.return_value = "content"
+        mock_search_cls.return_value.index_document.side_effect = SearchServiceError(
+            "index down"
+        )
+
+        file = SimpleUploadedFile("test.txt", b"hello", content_type="text/plain")
+        resp = client.post(
+            self.URL,
+            {"title": "Orphan", "file": file},
+            format="multipart",
+        )
+
+        assert resp.status_code == 500
+        mock_blob.delete_document.assert_called_once()
+        assert mock_blob.delete_document.call_args.kwargs["document_id"] == "orphan1"
+        assert not Document.objects.filter(document_id="orphan1").exists()
+
+    @patch("api.views.AzureSearchService")
+    @patch("api.views.AzureBlobService")
+    def test_upload_zero_chunks_returns_400_and_cleans_up(
+        self, mock_blob_cls, mock_search_cls, client, db
+    ):
+        """一個 chunk 都沒索引成功的文件不可回 201 — 它永遠檢索不到。"""
+        mock_blob = mock_blob_cls.return_value
+        mock_blob.upload_document.return_value = ("empty1", "https://blob/x")
+        mock_blob.extract_text.return_value = ""
+        mock_search_cls.return_value.index_document.return_value = 0
+
+        file = SimpleUploadedFile("empty.txt", b" ", content_type="text/plain")
+        resp = client.post(
+            self.URL,
+            {"title": "Empty", "file": file},
+            format="multipart",
+        )
+
+        assert resp.status_code == 400
+        mock_blob.delete_document.assert_called_once()
+        assert not Document.objects.filter(document_id="empty1").exists()
+
     def test_upload_unauthenticated_returns_401(self, anon_client):
         file = SimpleUploadedFile("test.txt", b"hello", content_type="text/plain")
         resp = anon_client.post(
