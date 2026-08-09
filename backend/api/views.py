@@ -159,8 +159,11 @@ class ChatCompletionView(APIView):
                 ):
                     yield sse_event({"token": token})
                 yield sse_event({"done": True})
-            except OpenAIServiceError as exc:
-                yield sse_event({"error": str(exc)})
+            except OpenAIServiceError:
+                # 與非串流路徑一致:例外訊息包著 SDK 原始錯誤 (端點、部署名
+                # 稱、request id),只進伺服器日誌,不隨事件送到瀏覽器。
+                # 細節已由 service 層以 exc_info 記錄,這裡不重複記。
+                yield sse_event({"error": "AI 服務暫時無法使用,請稍後再試"})
 
         response = StreamingHttpResponse(
             event_stream(), content_type="text/event-stream"
