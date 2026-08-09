@@ -478,3 +478,29 @@ class TestJWTEndpoints:
             format="json",
         )
         assert resp.status_code == 401
+
+    def test_refresh_rotates_and_blacklists_old_token(self, user, db):
+        """
+        refresh 必須輪替並把舊 token 列入黑名單 — 少了黑名單,每次
+        refresh 都多發一枚 7 天有效的憑證且舊的照常可用,無從撤銷。
+        """
+        api_client = APIClient()
+        resp = api_client.post(
+            "/api/token/",
+            {"username": "alice", "password": "VerySecret123!"},
+            format="json",
+        )
+        old_refresh = resp.json()["refresh"]
+
+        resp = api_client.post(
+            "/api/token/refresh/", {"refresh": old_refresh}, format="json"
+        )
+        assert resp.status_code == 200
+        # 輪替開啟時回應須帶新 refresh token,前端據此更新儲存值
+        assert "refresh" in resp.json()
+
+        # 舊 refresh token 已進黑名單,再用一次必須被拒絕
+        resp = api_client.post(
+            "/api/token/refresh/", {"refresh": old_refresh}, format="json"
+        )
+        assert resp.status_code == 401

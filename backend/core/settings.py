@@ -36,6 +36,9 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "rest_framework",
     "rest_framework_simplejwt",
+    # refresh token 輪替後把舊 token 列入黑名單 (見 SIMPLE_JWT 設定)。
+    # 其 migration 隨套件提供,startup.sh 的 migrate --noinput 會自動套用。
+    "rest_framework_simplejwt.token_blacklist",
     "corsheaders",
     "django_filters",
     "api.apps.ApiConfig",
@@ -124,10 +127,10 @@ SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(minutes=60),
     "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
     "ROTATE_REFRESH_TOKENS": True,
-    # 若需 blacklist 舊 refresh token,須加入 INSTALLED_APPS:
-    #   "rest_framework_simplejwt.token_blacklist"
-    # 並執行 migrate。MVP 階段先關閉以簡化部署。
-    "BLACKLIST_AFTER_ROTATION": False,
+    # 輪替若不搭配 blacklist,每次 refresh 都多發一枚 7 天有效的 refresh
+    # token 而舊的照常可用 — 掛一整天的分頁會累積數十枚等效憑證,任何
+    # 一枚外洩都無從撤銷。公開 demo 由多人共用同一帳號,這條路徑必須封住。
+    "BLACKLIST_AFTER_ROTATION": True,
 }
 
 # HTTP 安全標頭 (生產環境)

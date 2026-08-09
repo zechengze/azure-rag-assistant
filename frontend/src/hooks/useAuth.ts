@@ -82,8 +82,14 @@ export function useAuth(): UseAuthReturn {
       logout();
       return null;
     }
-    const data = (await resp.json()) as { access: string };
+    // 後端啟用 refresh token 輪替 + 黑名單:每次 refresh 都會發新的
+    // refresh token 並把舊的列入黑名單。不儲存新值的話,下一次 refresh
+    // 會拿黑名單裡的舊 token 而被登出。
+    const data = (await resp.json()) as { access: string; refresh?: string };
     localStorage.setItem(ACCESS_KEY, data.access);
+    if (data.refresh !== undefined) {
+      localStorage.setItem(REFRESH_KEY, data.refresh);
+    }
     setState({ accessToken: data.access, isAuthenticated: true });
     return data.access;
   }, [logout]);
