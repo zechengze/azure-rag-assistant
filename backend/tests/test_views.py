@@ -291,6 +291,51 @@ class TestDocumentUploadView:
         )
         assert resp.status_code == 500
 
+    def test_upload_mismatched_pdf_content_returns_400(self, client):
+        """宣告 PDF 但內容不是 PDF — 須在進入 Azure 管線前擋下。"""
+        file = SimpleUploadedFile(
+            "fake.pdf", b"just some text", content_type="application/pdf"
+        )
+        resp = client.post(
+            self.URL,
+            {"title": "Fake PDF", "file": file},
+            format="multipart",
+        )
+        assert resp.status_code == 400
+
+    def test_upload_non_utf8_txt_returns_400(self, client):
+        """text/plain 但非 UTF-8 — 提早在驗證層以 400 失敗,而非後續 500。"""
+        file = SimpleUploadedFile(
+            "binary.txt", b"\xff\xfe\x00\x01\x80", content_type="text/plain"
+        )
+        resp = client.post(
+            self.URL,
+            {"title": "Binary", "file": file},
+            format="multipart",
+        )
+        assert resp.status_code == 400
+
+    @patch("api.views.AzureSearchService")
+    @patch("api.views.AzureBlobService")
+    def test_upload_pdf_magic_bytes_accepted(
+        self, mock_blob_cls, mock_search_cls, client, db
+    ):
+        """開頭為 %PDF- 的檔案應通過內容驗證。"""
+        mock_blob = mock_blob_cls.return_value
+        mock_blob.upload_document.return_value = ("pdfdoc1", "https://blob/x")
+        mock_blob.extract_text.return_value = "PDF 內文"
+        mock_search_cls.return_value.index_document.return_value = 1
+
+        file = SimpleUploadedFile(
+            "real.pdf", b"%PDF-1.7 fake body", content_type="application/pdf"
+        )
+        resp = client.post(
+            self.URL,
+            {"title": "Real PDF", "file": file},
+            format="multipart",
+        )
+        assert resp.status_code == 201
+
     def test_upload_unauthenticated_returns_401(self, anon_client):
         file = SimpleUploadedFile("test.txt", b"hello", content_type="text/plain")
         resp = anon_client.post(
