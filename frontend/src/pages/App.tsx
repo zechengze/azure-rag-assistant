@@ -84,7 +84,7 @@ export function App(): JSX.Element {
           </button>
           <button
             onClick={auth.logout}
-            className="hidden text-xs text-gray-500 hover:text-gray-700 md:block"
+            className="-mr-1.5 hidden rounded px-1.5 py-1.5 text-xs text-gray-500 hover:bg-gray-100 hover:text-gray-700 md:block"
           >
             登出
           </button>

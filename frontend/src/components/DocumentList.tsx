@@ -70,7 +70,7 @@ export function DocumentList({
                   disabled={isDeleting}
                   aria-label={`刪除 ${doc.title}`}
                   title="刪除"
-                  className="shrink-0 rounded p-1 text-gray-400 opacity-0 transition hover:bg-red-50 hover:text-red-600 focus:opacity-100 focus:outline-none focus:ring-2 focus:ring-red-400 group-hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-100"
+                  className="-mr-2 flex h-11 w-11 shrink-0 items-center justify-center rounded text-gray-400 transition hover:bg-red-50 hover:text-red-600 focus:opacity-100 focus:outline-none focus:ring-2 focus:ring-red-400 disabled:cursor-not-allowed disabled:opacity-100 can-hover:opacity-0 can-hover:group-hover:opacity-100"
                 >
                   {isDeleting ? <SpinnerIcon /> : <TrashIcon />}
                 </button>

@@ -137,7 +137,15 @@ export function DocumentUpload({
           disabled={state.isUploading}
         />
         <p className="text-sm text-gray-600">
-          {state.isUploading ? `上傳中 ${state.progress}%` : "拖放檔案至此或點擊上傳"}
+          {state.isUploading ? (
+            `上傳中 ${state.progress}%`
+          ) : (
+            <>
+              {/* 觸控裝置沒有拖放,依指標能力切換文案而非螢幕寬度 */}
+              <span className="can-hover:hidden">點擊選擇檔案</span>
+              <span className="hidden can-hover:inline">拖放檔案至此或點擊上傳</span>
+            </>
+          )}
         </p>
         <p className="text-xs text-gray-400 mt-1">
           支援 PDF / TXT / DOCX,最大 {MAX_SIZE_MB} MB
