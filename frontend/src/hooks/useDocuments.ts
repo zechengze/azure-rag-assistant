@@ -56,6 +56,16 @@ export function useDocuments(
 
   useEffect(() => {
     if (!enabled) {
+      // 此處刻意不改用「回傳時依 enabled 推導」的寫法。推導雖然能移除這次
+      // setState,但 state 會留著上一個帳號的清單:下一位使用者登入後,在
+      // reload() 完成前 (一個網路往返) 會渲染前一位的文件標題,而
+      // DocumentList 的 `isLoading && documents.length === 0` 判斷還會讓它
+      // 跳過「載入中」直接顯示。
+      //
+      // 真正的推導解法需要 session 識別,但 access token 會在 refresh 時輪替,
+      // 拿它當 key 會讓清單無故清空;登出也有不經過按鈕的自動路徑
+      // (useAuth 於 refresh 失敗時),所以「在 handler 清空」同樣蓋不全。
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- 清除跨帳號殘留優先於避免一次連鎖 render
       setDocuments([]);
       return;
     }
