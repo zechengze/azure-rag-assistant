@@ -31,11 +31,9 @@ export default tseslint.config(
       "react-refresh": reactRefresh,
     },
     rules: {
-      // 對齊遷移前 plugin:react-hooks/recommended (v4) 的兩條規則。
-      // v7 的 recommended 擴增為 17 條 (React Compiler 規則集),
-      // 那是行為變更而非設定遷移,另案評估。
-      "react-hooks/rules-of-hooks": "error",
-      "react-hooks/exhaustive-deps": "warn",
+      // react-hooks v7 的完整 recommended (17 條,React Compiler 規則集)。
+      // 遷移到 eslint 10 時暫時只保留 v4 的兩條,此處補上其餘 15 條。
+      ...reactHooks.configs["recommended-latest"].rules,
       "react-refresh/only-export-components": [
         "warn",
         { allowConstantExport: true },
