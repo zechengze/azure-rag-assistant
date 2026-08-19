@@ -40,7 +40,7 @@ gunicorn==23.0.0
 
 # Code Quality
 black==26.5.1
-isort==5.13.2
+isort==8.0.1
 flake8==7.1.1
 mypy==1.11.2
 django-stubs==5.0.4
