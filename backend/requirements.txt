@@ -43,7 +43,10 @@ black==26.5.1
 isort==8.0.1
 flake8==7.1.1
 mypy==1.11.2
-django-stubs==5.0.4
+# django-stubs 的主版本需對齊 Django 主版本:5.0.x 搭 Django 5.2 時,
+# mypy plugin 無法為 model 掛上預設 manager,Document.objects 會誤報
+# attr-defined。
+django-stubs==5.2.9
 
 # Testing
 pytest==9.1.1

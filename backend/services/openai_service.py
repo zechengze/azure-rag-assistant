@@ -6,7 +6,7 @@ Azure OpenAI 服務封裝層。
 from __future__ import annotations
 
 import logging
-from typing import Iterator, cast
+from typing import Iterator
 
 from django.conf import settings
 from openai import (
@@ -17,7 +17,14 @@ from openai import (
     Stream,
 )
 from openai.types import CreateEmbeddingResponse
-from openai.types.chat import ChatCompletion, ChatCompletionChunk
+from openai.types.chat import (
+    ChatCompletion,
+    ChatCompletionAssistantMessageParam,
+    ChatCompletionChunk,
+    ChatCompletionMessageParam,
+    ChatCompletionSystemMessageParam,
+    ChatCompletionUserMessageParam,
+)
 from tenacity import (
     retry,
     retry_if_exception_type,
@@ -75,7 +82,9 @@ class AzureOpenAIService:
         )
 
     @_retry_azure_openai
-    def _create_chat_completion(self, messages: list[dict]) -> ChatCompletion:
+    def _create_chat_completion(
+        self, messages: list[ChatCompletionMessageParam]
+    ) -> ChatCompletion:
         return self._client.chat.completions.create(
             model=self._chat_deployment,
             messages=messages,
@@ -84,18 +93,19 @@ class AzureOpenAIService:
         )
 
     @_retry_azure_openai
-    def _open_chat_stream(self, messages: list[dict]) -> Stream[ChatCompletionChunk]:
+    def _open_chat_stream(
+        self, messages: list[ChatCompletionMessageParam]
+    ) -> Stream[ChatCompletionChunk]:
         """只重試「建立串流」這一步 —— 已經吐出 token 後重試會重複輸出。"""
-        stream = self._client.chat.completions.create(
+        # messages 帶上 ChatCompletionMessageParam 後,mypy 便能靠 stream=True
+        # 選中回傳 Stream 的那個 overload,不需要再 cast。
+        return self._client.chat.completions.create(
             model=self._chat_deployment,
             messages=messages,
             temperature=0.7,
             max_tokens=1500,
             stream=True,
         )
-        # create() 的回傳型別隨 stream 參數而異,mypy 無法從這裡窄化,
-        # 但 stream=True 時 SDK 必定回傳 Stream。
-        return cast(Stream[ChatCompletionChunk], stream)
 
     # ── 對外 API ────────────────────────────────────────────────────────
 
@@ -188,7 +198,7 @@ class AzureOpenAIService:
         user_query: str,
         context_documents: list[dict],
         conversation_history: list[dict],
-    ) -> list[dict]:
+    ) -> list[ChatCompletionMessageParam]:
         """
         組裝對話訊息，System Prompt 與使用者輸入嚴格分離。
 
@@ -210,15 +220,30 @@ class AzureOpenAIService:
             f"參考文件：\n{context_text}"
         )
 
-        messages: list[dict] = [{"role": "system", "content": system_prompt}]
+        # 這些 *MessageParam 都是 TypedDict,執行期就是普通 dict,
+        # 但能讓 mypy 檢查 role 與 content 的組合是否為 SDK 接受的形狀。
+        messages: list[ChatCompletionMessageParam] = [
+            ChatCompletionSystemMessageParam(role="system", content=system_prompt)
+        ]
 
         # 加入歷史對話（最近 6 輪）
         for entry in conversation_history[-6:]:
-            if entry.get("role") in ("user", "assistant"):
-                messages.append({"role": entry["role"], "content": entry["content"]})
+            role = entry.get("role")
+            if role == "user":
+                messages.append(
+                    ChatCompletionUserMessageParam(
+                        role="user", content=entry["content"]
+                    )
+                )
+            elif role == "assistant":
+                messages.append(
+                    ChatCompletionAssistantMessageParam(
+                        role="assistant", content=entry["content"]
+                    )
+                )
 
         # 使用者輸入獨立於 System Prompt 之外
-        messages.append({"role": "user", "content": user_query})
+        messages.append(ChatCompletionUserMessageParam(role="user", content=user_query))
         return messages
 
 
