@@ -31,7 +31,7 @@ psycopg2-binary==2.9.9
 
 # Document Processing
 python-docx==1.1.2
-tiktoken==0.7.0
+tiktoken==0.14.0
 
 # WSGI Server (production)
 # >=23.0.0: 22.x 有 CVE-2024-6827 (Transfer-Encoding 驗證缺陷,可被用於
