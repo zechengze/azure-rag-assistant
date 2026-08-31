@@ -19,7 +19,7 @@ azure-identity==1.25.3
 msal==1.37.0
 
 # OpenAI
-openai==1.40.0
+openai==3.5.0
 # httpx 0.28 移除了 openai 1.40 依賴的 `proxies` 參數,需釘住舊版直到升級 openai
 httpx<0.28
 
