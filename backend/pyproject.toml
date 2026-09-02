@@ -18,11 +18,20 @@ skip = ["migrations", "venv", ".venv"]
 
 [tool.mypy]
 python_version = "3.11"
+# django-stubs 的 plugin 必須掛上,否則 mypy 看不懂 models.Field 的
+# descriptor 行為,每個 model 欄位都會報 [var-annotated]。
+plugins = ["mypy_django_plugin.main"]
 warn_redundant_casts = true
 warn_unused_ignores = true
 disallow_untyped_defs = false
 ignore_missing_imports = true
 exclude = ["migrations/", "venv/", "\\.venv/", "manage\\.py"]
+
+[tool.django-stubs]
+# 指向 settings_test 而非 settings:plugin 會實際匯入此模組並跑 django.setup(),
+# settings_test 自帶全部佔位環境變數,CI 因此不需要注入任何金鑰即可通過型別檢查
+# (與 pytest.ini 的 DJANGO_SETTINGS_MODULE 一致)。
+django_settings_module = "core.settings_test"
 
 [tool.coverage.run]
 branch = true

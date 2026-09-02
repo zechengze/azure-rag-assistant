@@ -75,29 +75,33 @@ class AzureSearchService:
     def _create_index(self) -> None:
         """建立支援向量搜尋的 Azure AI Search 索引。"""
         fields = [
-            SimpleField(name="id", type=SearchFieldDataType.String, key=True),
+            SimpleField(name="id", type=SearchFieldDataType.STRING, key=True),
             SimpleField(
-                name="document_id", type=SearchFieldDataType.String, filterable=True
+                name="document_id", type=SearchFieldDataType.STRING, filterable=True
             ),
             SimpleField(
-                name="user_id", type=SearchFieldDataType.String, filterable=True
+                name="user_id", type=SearchFieldDataType.STRING, filterable=True
             ),
             SearchableField(
                 name="title",
-                type=SearchFieldDataType.String,
+                type=SearchFieldDataType.STRING,
                 analyzer_name="zh-Hant.lucene",
             ),
             SearchableField(
                 name="content",
-                type=SearchFieldDataType.String,
+                type=SearchFieldDataType.STRING,
                 analyzer_name="zh-Hant.lucene",
             ),
             SimpleField(
-                name="chunk_index", type=SearchFieldDataType.Int32, sortable=True
+                name="chunk_index", type=SearchFieldDataType.INT32, sortable=True
             ),
             SearchField(
                 name="content_vector",
-                type=SearchFieldDataType.Collection(SearchFieldDataType.Single),
+                # SDK 的 SearchFieldDataType.Collection() 是 _patch.py 於執行期
+                # monkey-patch 上去的 staticmethod,mypy 只看到 Enum 而回報
+                # 「Enum not callable」。這裡直接組出同一個字串
+                # ("Collection(Edm.Single)"),行為完全相同且型別可檢查。
+                type=f"Collection({SearchFieldDataType.SINGLE.value})",
                 searchable=True,
                 vector_search_dimensions=1536,
                 vector_search_profile_name="hnswProfile",
@@ -294,7 +298,7 @@ class AzureSearchService:
             if current_length + sentence_length > chunk_size and current_chunk:
                 chunks.append(" ".join(current_chunk))
                 # 保留最後幾個句子作為 overlap
-                overlap_sentences = []
+                overlap_sentences: list[str] = []
                 overlap_length = 0
                 for s in reversed(current_chunk):
                     if overlap_length + len(s) <= overlap:

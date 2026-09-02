@@ -177,11 +177,14 @@ class AzureBlobService:
         try:
             from docx import Document as DocxDocument
 
-            # python-docx 需要可 seek 的檔案物件
-            data = file.read() if hasattr(file, "read") else file
-            if isinstance(data, bytes):
-                data = BytesIO(data)
-            doc = DocxDocument(data)
+            # python-docx 需要可 seek 的檔案物件,先整份讀進記憶體確保可 seek
+            # (Django 的 UploadedFile 分塊落地時不保證支援 seek)。
+            #
+            # 原本的 `file.read() if hasattr(file, "read") else file` 分支在
+            # 型別上永遠成立 —— 參數已宣告為 IO[bytes] —— 卻讓 mypy 把 data
+            # 推成 bytes 與 IO[bytes] 的 join (Iterable[object]),因而無法傳給
+            # DocxDocument。直接讀取即可,對所有實際呼叫端行為不變。
+            doc = DocxDocument(BytesIO(file.read()))
             return "\n".join(p.text for p in doc.paragraphs if p.text.strip())
         except Exception as exc:
             raise BlobServiceError(f"DOCX 解析失敗: {exc}") from exc

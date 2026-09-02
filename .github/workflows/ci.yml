@@ -44,7 +44,7 @@ jobs:
         run: flake8 .
 
       - name: Type check (mypy)
-        run: mypy . || true  # 規格中 mypy 為「靜態分析」,允許 warning-only 直到完整型別覆蓋
+        run: mypy .
 
       - name: Run tests with coverage
         run: pytest --cov=. --cov-report=term-missing --cov-fail-under=70
